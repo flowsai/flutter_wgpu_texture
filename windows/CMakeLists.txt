@@ -1,0 +1,31 @@
+# The Flutter tooling requires that developers have a version of Visual Studio
+# installed that includes CMake 3.14 or later. You should not increase this
+# version, as doing so will cause the plugin to fail to compile for some
+# customers of the plugin.
+cmake_minimum_required(VERSION 3.14)
+
+set(PROJECT_NAME "flutter_wgpu_texture")
+project(${PROJECT_NAME} LANGUAGES CXX)
+
+set(PLUGIN_NAME "flutter_wgpu_texture_plugin")
+
+add_library(${PLUGIN_NAME} SHARED
+  "flutter_wgpu_texture_plugin.cpp"
+  "include/flutter_wgpu_texture/flutter_wgpu_texture_plugin.h"
+)
+
+apply_standard_settings(${PLUGIN_NAME})
+
+target_compile_definitions(${PLUGIN_NAME} PRIVATE FLUTTER_PLUGIN_IMPL)
+target_include_directories(${PLUGIN_NAME} INTERFACE
+  "${CMAKE_CURRENT_SOURCE_DIR}/include"
+)
+target_link_libraries(${PLUGIN_NAME} PRIVATE flutter flutter_wrapper_plugin)
+
+include("../cargokit/cmake/cargokit.cmake")
+apply_cargokit(${PLUGIN_NAME} ../rust flutter_wgpu_texture "")
+
+set(flutter_wgpu_texture_bundled_libraries
+  "${${PLUGIN_NAME}_cargokit_lib}"
+  PARENT_SCOPE
+)

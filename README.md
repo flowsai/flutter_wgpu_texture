@@ -2,26 +2,48 @@
 
 Desktop Flutter texture plugin powered by Rust and `wgpu`.
 
-Supported targets:
+Supported platforms:
 
 - macOS
 - Windows
 - Linux
 
-Disabled for now:
+Not supported:
 
-- Web
 - Android
 - iOS
+- Web
 
-The package provides:
+The root repo may still contain standard Flutter plugin scaffolding for
+unsupported platforms, but the current plugin implementation is desktop-only.
+
+## What the package provides
 
 - `FlutterWgpuTexture`: Flutter widget that displays a native GPU texture
-- `FlutterWgpuTextureController`: controller that owns the native renderer and
-  forwards runtime commands into Rust
-- a desktop-native present bridge per platform
+- `FlutterWgpuTextureController`: controller that owns the renderer lifecycle,
+  surface sizing, animation ticker, and command bridge into Rust
+- desktop-native presentation bridges for macOS, Windows, and Linux
 
-The rotating cube demo lives in [examples/spinning_cube](./examples/spinning_cube).
+## Examples
+
+- [examples/spinning_cube](./examples/spinning_cube): rotating 3D cube demo
+- [examples/particles](./examples/particles): particle scene with size and
+  motion controls
+- [examples/shader_playground](./examples/shader_playground): fullscreen WGSL
+  shader demo with live uniform controls
+
+## Requirements
+
+- Flutter desktop toolchain for your target platform
+- Rust toolchain
+- Platform-native build prerequisites:
+  - macOS: Xcode command line tools / Xcode
+  - Windows: Visual Studio C++ build tools
+  - Linux: desktop Flutter toolchain plus Vulkan/EGL-related dependencies used
+    by the plugin path
+
+This package uses `flutter_rust_bridge` and `cargokit` to build and load the
+Rust side.
 
 ## Quick start
 
@@ -33,7 +55,7 @@ FlutterWgpuTexture(
 )
 ```
 
-Control the native Rust renderer at runtime:
+Control the Rust renderer at runtime:
 
 ```dart
 await controller.stopAnimation();
@@ -42,6 +64,72 @@ await controller.setBackgroundColor(const Color(0xFF1B5CFF));
 await controller.setFloatParam('rotation_speed', 0.8);
 await controller.invokeRustCommand('reset_scene');
 ```
+
+To select a built-in scene:
+
+```dart
+final controller = FlutterWgpuTextureController(
+  sceneType: 'particles',
+);
+```
+
+Known built-in scene types:
+
+- `cube`
+- `particles`
+- `shader_playground`
+
+Known built-in runtime params:
+
+- `cube`
+  - `rotation_speed`
+  - `angle`
+  - `cube_color`
+  - `background_color`
+- `particles`
+  - `point_size`
+  - `motion_scale`
+  - `time`
+  - `color1`
+  - `color2`
+  - `background_color`
+- `shader_playground`
+  - `speed`
+  - `noise_scale`
+  - `distortion`
+  - `time`
+  - `primary_color`
+  - `secondary_color`
+  - `pointer`
+  - `background_color`
+
+## Running the examples
+
+Spinning cube:
+
+```bash
+cd examples/spinning_cube
+flutter pub get
+flutter run -d macos
+```
+
+Particles:
+
+```bash
+cd examples/particles
+flutter pub get
+flutter run -d macos
+```
+
+Shader playground:
+
+```bash
+cd examples/shader_playground
+flutter pub get
+flutter run -d macos
+```
+
+Replace `macos` with `windows` or `linux` as needed.
 
 ## Architecture
 
@@ -52,7 +140,7 @@ await controller.invokeRustCommand('reset_scene');
   - `rust/src/engine.rs`
   - `rust/src/present.rs`
   - `rust/src/api/mod.rs`
-- Native platform bridges:
+- Native desktop bridges:
   - `macos/`
   - `windows/`
   - `linux/`
@@ -62,30 +150,3 @@ More detail:
 - [docs/architecture.md](./docs/architecture.md)
 - [docs/extending_rust_logic.md](./docs/extending_rust_logic.md)
 - [docs/platforms.md](./docs/platforms.md)
-
-## Extending the Rust logic
-
-The controller already exposes generic command forwarding:
-
-- `setBoolParam`
-- `setFloatParam`
-- `setVec4Param`
-- `invokeRustCommand`
-
-If you need more Rust-side behavior:
-
-1. add the state/command in `rust/src/engine.rs`
-2. expose it through `rust/src/api/mod.rs` if needed
-3. regenerate FRB bindings
-4. optionally add a typed controller helper
-
-The full workflow is documented in
-[docs/extending_rust_logic.md](./docs/extending_rust_logic.md).
-
-## Running the cube demo
-
-```bash
-cd examples/spinning_cube
-flutter pub get
-flutter run -d linux
-```

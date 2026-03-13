@@ -9,5 +9,4 @@ Run from this directory:
 flutter run -d macos
 ```
 
-Use the controls to adjust speed, noise scale, and pointer distortion. Drag or
-hover over the viewport to push the flow field.
+Use the controls to adjust speed, noise scale, and distortion.

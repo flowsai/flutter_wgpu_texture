@@ -1,7 +1,7 @@
 name: flutter_wgpu_texture
 description: "Desktop Flutter texture plugin powered by Rust and wgpu."
 version: 0.0.1
-homepage: https://github.com/example/flutter_wgpu_texture
+homepage: https://github.com/flowsai/flutter_wgpu_texture
 
 environment:
   sdk: ^3.8.0

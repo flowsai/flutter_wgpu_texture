@@ -3,30 +3,31 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_wgpu_texture/flutter_wgpu_texture.dart';
 
-void main() => runApp(const ParticlesApp());
+void main() => runApp(const ShaderPlaygroundApp());
 
-class ParticlesApp extends StatefulWidget {
-  const ParticlesApp({super.key});
+class ShaderPlaygroundApp extends StatefulWidget {
+  const ShaderPlaygroundApp({super.key});
 
   @override
-  State<ParticlesApp> createState() => _ParticlesAppState();
+  State<ShaderPlaygroundApp> createState() => _ShaderPlaygroundAppState();
 }
 
-class _ParticlesAppState extends State<ParticlesApp> {
+class _ShaderPlaygroundAppState extends State<ShaderPlaygroundApp> {
   late final FlutterWgpuTextureController controller;
 
-  final Color accentColor = const Color(0xFFFFD54A);
-  final Color backgroundColor = const Color(0xFF03070F);
+  final Color accentColor = const Color(0xFFFF5A2A);
+  final Color backgroundColor = const Color(0xFF091119);
 
-  double pointSize = 14.0;
-  double motionScale = 1.0;
+  double speed = 1.0;
+  double noiseScale = 2.4;
+  double distortion = 1.0;
 
   @override
   void initState() {
     super.initState();
     controller = FlutterWgpuTextureController(
       autoStart: true,
-      sceneType: 'particles',
+      sceneType: 'shader_playground',
     );
   }
 
@@ -45,7 +46,7 @@ class _ParticlesAppState extends State<ParticlesApp> {
           seedColor: accentColor,
           brightness: Brightness.light,
         ),
-        scaffoldBackgroundColor: const Color(0xFFF5F1EA),
+        scaffoldBackgroundColor: const Color(0xFFF4EFE8),
         useMaterial3: true,
       ),
       home: AnimatedBuilder(
@@ -56,13 +57,13 @@ class _ParticlesAppState extends State<ParticlesApp> {
             body: SafeArea(
               child: Center(
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 1120),
+                  constraints: const BoxConstraints(maxWidth: 1180),
                   child: Padding(
                     padding: const EdgeInsets.all(24),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        _HeroHeader(
+                        _ShaderHeader(
                           backendLabel: backend == null
                               ? 'Preparing renderer'
                               : '${backend.backend} on ${backend.deviceName}',
@@ -73,8 +74,8 @@ class _ParticlesAppState extends State<ParticlesApp> {
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
                               Expanded(
-                                flex: 7,
-                                child: _PreviewPanel(
+                                flex: 8,
+                                child: _ShaderPreview(
                                   controller: controller,
                                   backgroundColor: backgroundColor,
                                 ),
@@ -82,15 +83,19 @@ class _ParticlesAppState extends State<ParticlesApp> {
                               const SizedBox(width: 20),
                               SizedBox(
                                 width: 300,
-                                child: _ControlPanel(
+                                child: _ShaderControls(
                                   controller: controller,
-                                  pointSize: pointSize,
-                                  motionScale: motionScale,
-                                  onPointSizeChanged: (value) {
-                                    unawaited(_setPointSize(value));
+                                  speed: speed,
+                                  noiseScale: noiseScale,
+                                  distortion: distortion,
+                                  onSpeedChanged: (value) {
+                                    unawaited(_setSpeed(value));
                                   },
-                                  onMotionScaleChanged: (value) {
-                                    unawaited(_setMotionScale(value));
+                                  onNoiseScaleChanged: (value) {
+                                    unawaited(_setNoiseScale(value));
+                                  },
+                                  onDistortionChanged: (value) {
+                                    unawaited(_setDistortion(value));
                                   },
                                   onReset: () {
                                     unawaited(_resetScene());
@@ -112,32 +117,39 @@ class _ParticlesAppState extends State<ParticlesApp> {
     );
   }
 
-  Future<void> _setPointSize(double value) async {
-    setState(() => pointSize = value);
-    await controller.setFloatParam('point_size', value);
+  Future<void> _setSpeed(double value) async {
+    setState(() => speed = value);
+    await controller.setFloatParam('speed', value);
   }
 
-  Future<void> _setMotionScale(double value) async {
-    setState(() => motionScale = value);
-    await controller.setFloatParam('motion_scale', value);
+  Future<void> _setNoiseScale(double value) async {
+    setState(() => noiseScale = value);
+    await controller.setFloatParam('noise_scale', value);
+  }
+
+  Future<void> _setDistortion(double value) async {
+    setState(() => distortion = value);
+    await controller.setFloatParam('distortion', value);
   }
 
   Future<void> _resetScene() async {
     setState(() {
-      pointSize = 14.0;
-      motionScale = 1.0;
+      speed = 1.0;
+      noiseScale = 2.4;
+      distortion = 1.0;
     });
     await controller.resetScene();
-    await controller.setFloatParam('point_size', pointSize);
-    await controller.setFloatParam('motion_scale', motionScale);
+    await controller.setFloatParam('speed', speed);
+    await controller.setFloatParam('noise_scale', noiseScale);
+    await controller.setFloatParam('distortion', distortion);
     if (!controller.isAnimating) {
       await controller.startAnimation();
     }
   }
 }
 
-class _HeroHeader extends StatelessWidget {
-  const _HeroHeader({required this.backendLabel});
+class _ShaderHeader extends StatelessWidget {
+  const _ShaderHeader({required this.backendLabel});
 
   final String backendLabel;
 
@@ -145,11 +157,11 @@ class _HeroHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(28),
+        borderRadius: BorderRadius.circular(30),
         gradient: const LinearGradient(
           colors: [
-            Color(0xFFFFF3D6),
-            Color(0xFFE8F6FF),
+            Color(0xFFFFE3D8),
+            Color(0xFFDFF7FF),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
@@ -164,17 +176,17 @@ class _HeroHeader extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Particles',
+                    'Shader Playground',
                     style: Theme.of(context).textTheme.displaySmall?.copyWith(
                       fontWeight: FontWeight.w800,
-                      color: const Color(0xFF1B1B1B),
+                      color: const Color(0xFF1D1A17),
                     ),
                   ),
                   const SizedBox(height: 10),
                   Text(
-                    'A clean desktop particle demo with only the controls that actually matter.',
+                    'A procedural WGSL scene with only the controls that visibly affect the output.',
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: const Color(0xFF3F3B36),
+                      color: const Color(0xFF4E473F),
                     ),
                   ),
                 ],
@@ -202,8 +214,8 @@ class _HeroHeader extends StatelessWidget {
   }
 }
 
-class _PreviewPanel extends StatelessWidget {
-  const _PreviewPanel({
+class _ShaderPreview extends StatelessWidget {
+  const _ShaderPreview({
     required this.controller,
     required this.backgroundColor,
   });
@@ -234,7 +246,7 @@ class _PreviewPanel extends StatelessWidget {
             Row(
               children: [
                 Text(
-                  'Live Scene',
+                  'Live Shader',
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                     fontWeight: FontWeight.w700,
                   ),
@@ -262,7 +274,9 @@ class _PreviewPanel extends StatelessWidget {
                     controller: controller,
                     placeholder: DecoratedBox(
                       decoration: BoxDecoration(color: backgroundColor),
-                      child: const Center(child: CircularProgressIndicator()),
+                      child: const Center(
+                        child: CircularProgressIndicator(),
+                      ),
                     ),
                   ),
                 ),
@@ -275,21 +289,25 @@ class _PreviewPanel extends StatelessWidget {
   }
 }
 
-class _ControlPanel extends StatelessWidget {
-  const _ControlPanel({
+class _ShaderControls extends StatelessWidget {
+  const _ShaderControls({
     required this.controller,
-    required this.pointSize,
-    required this.motionScale,
-    required this.onPointSizeChanged,
-    required this.onMotionScaleChanged,
+    required this.speed,
+    required this.noiseScale,
+    required this.distortion,
+    required this.onSpeedChanged,
+    required this.onNoiseScaleChanged,
+    required this.onDistortionChanged,
     required this.onReset,
   });
 
   final FlutterWgpuTextureController controller;
-  final double pointSize;
-  final double motionScale;
-  final ValueChanged<double> onPointSizeChanged;
-  final ValueChanged<double> onMotionScaleChanged;
+  final double speed;
+  final double noiseScale;
+  final double distortion;
+  final ValueChanged<double> onSpeedChanged;
+  final ValueChanged<double> onNoiseScaleChanged;
+  final ValueChanged<double> onDistortionChanged;
   final VoidCallback onReset;
 
   @override
@@ -298,7 +316,7 @@ class _ControlPanel extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFFFDFBF8),
         borderRadius: BorderRadius.circular(30),
-        border: Border.all(color: const Color(0xFFE9E0D3)),
+        border: Border.all(color: const Color(0xFFE8DED1)),
       ),
       child: Padding(
         padding: const EdgeInsets.all(22),
@@ -306,28 +324,37 @@ class _ControlPanel extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              'Controls',
+              'Uniforms',
               style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                 fontWeight: FontWeight.w700,
               ),
             ),
             const SizedBox(height: 18),
             _SliderTile(
-              label: 'Particle Size',
-              valueLabel: pointSize.toStringAsFixed(1),
-              value: pointSize,
-              min: 2.0,
-              max: 18.0,
-              onChanged: onPointSizeChanged,
+              label: 'Speed',
+              valueLabel: speed.toStringAsFixed(2),
+              value: speed,
+              min: 0.2,
+              max: 2.4,
+              onChanged: onSpeedChanged,
             ),
             const SizedBox(height: 10),
             _SliderTile(
-              label: 'Motion Scale',
-              valueLabel: motionScale.toStringAsFixed(2),
-              value: motionScale,
-              min: 0.4,
-              max: 1.8,
-              onChanged: onMotionScaleChanged,
+              label: 'Noise Scale',
+              valueLabel: noiseScale.toStringAsFixed(2),
+              value: noiseScale,
+              min: 0.8,
+              max: 4.0,
+              onChanged: onNoiseScaleChanged,
+            ),
+            const SizedBox(height: 10),
+            _SliderTile(
+              label: 'Distortion',
+              valueLabel: distortion.toStringAsFixed(2),
+              value: distortion,
+              min: 0.0,
+              max: 2.0,
+              onChanged: onDistortionChanged,
             ),
             const Spacer(),
             OutlinedButton(
@@ -339,7 +366,7 @@ class _ControlPanel extends StatelessWidget {
             const SizedBox(height: 10),
             FilledButton(
               onPressed: onReset,
-              child: const Text('Reset Scene'),
+              child: const Text('Reset Shader'),
             ),
           ],
         ),

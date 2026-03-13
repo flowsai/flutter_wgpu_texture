@@ -23,6 +23,7 @@ pub fn create_renderer(
 ) -> Result<RendererInfo, String> {
     let scene = match scene_type.as_str() {
         "particles" => engine::SceneType::Particles,
+        "shader_playground" => engine::SceneType::ShaderPlayground,
         _ => engine::SceneType::Cube,
     };
     let handle = engine::engine_create(width, height, scene)?;

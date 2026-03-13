@@ -118,6 +118,55 @@ fn fs_main(input: VsOut) -> @location(0) vec4<f32> {
 }
 "#;
 
+const SHADER_PLAYGROUND_SHADER: &str = r#"
+struct ShaderUniforms {
+  viewport: vec4<f32>,
+  pointer: vec4<f32>,
+  tuning: vec4<f32>,
+  primary_color: vec4<f32>,
+  secondary_color: vec4<f32>,
+};
+
+@group(0) @binding(0)
+var<uniform> uniforms: ShaderUniforms;
+
+struct ShaderVertexIn {
+  @location(0) position: vec2<f32>,
+  @location(1) uv: vec2<f32>,
+};
+
+struct VsOut {
+  @builtin(position) position: vec4<f32>,
+  @location(0) uv: vec2<f32>,
+};
+
+@vertex
+fn vs_main(input: ShaderVertexIn) -> VsOut {
+  var out: VsOut;
+  out.position = vec4<f32>(input.position, 0.0, 1.0);
+  out.uv = input.uv;
+  return out;
+}
+
+@fragment
+fn fs_main(input: VsOut) -> @location(0) vec4<f32> {
+  let time = uniforms.viewport.z;
+  let speed = uniforms.viewport.w;
+  let noise_scale = uniforms.tuning.x;
+  let distortion = uniforms.pointer.w;
+  let uv = input.uv;
+  let wave = 0.5 + 0.5 * sin(time * (0.6 + speed * 0.9) + uv.x * (3.0 + noise_scale * 2.2) - uv.y * (2.0 + distortion * 3.0));
+  let bands = 0.5 + 0.5 * sin(time * (0.8 + speed * 1.4) + uv.y * (5.0 + noise_scale * 3.0) + uv.x * distortion * 4.0);
+  let ripple = 0.5 + 0.5 * sin((uv.x + uv.y) * (4.0 + noise_scale * 2.0) - time * (0.4 + speed * 0.7));
+  let primary = uniforms.primary_color.rgb;
+  let secondary = uniforms.secondary_color.rgb;
+  let base = mix(primary, secondary, wave);
+  let accent = mix(secondary, primary, ripple) * distortion * 0.25;
+  let color = base * (0.45 + bands * 0.55) + accent + vec3<f32>(uv.x * 0.12, uv.y * 0.08, (1.0 - uv.x) * 0.12);
+  return vec4<f32>(color, 1.0);
+}
+"#;
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Vertex {
@@ -141,6 +190,16 @@ struct ParticleUniforms {
     dynamics: [f32; 4],
     color1: [f32; 4],
     color2: [f32; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct ShaderUniforms {
+    viewport: [f32; 4],
+    pointer: [f32; 4],
+    tuning: [f32; 4],
+    primary_color: [f32; 4],
+    secondary_color: [f32; 4],
 }
 
 struct CubeRenderer {
@@ -169,6 +228,21 @@ struct ParticlesRenderer {
     color2: [f32; 4],
 }
 
+struct ShaderPlaygroundRenderer {
+    pipeline: wgpu::RenderPipeline,
+    uniform_buffer: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+    vertex_buffer: wgpu::Buffer,
+    vertex_count: u32,
+    time: f32,
+    speed: f32,
+    noise_scale: f32,
+    distortion: f32,
+    pointer: [f32; 4],
+    primary_color: [f32; 4],
+    secondary_color: [f32; 4],
+}
+
 struct EngineDeviceContext {
     device: Arc<wgpu::Device>,
     queue: Arc<wgpu::Queue>,
@@ -184,6 +258,7 @@ struct EngineDeviceContext {
 pub enum SceneType {
     Cube,
     Particles,
+    ShaderPlayground,
 }
 
 pub(crate) struct Renderer {
@@ -196,6 +271,7 @@ pub(crate) struct Renderer {
     scene_type: SceneType,
     cube: CubeRenderer,
     particles: Option<ParticlesRenderer>,
+    shader_playground: Option<ShaderPlaygroundRenderer>,
     animation_running: bool,
     last_frame_at: Instant,
     clear_color: [f32; 4],
@@ -592,6 +668,13 @@ struct ParticleVertex {
     seed: f32,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct ShaderVertex {
+    position: [f32; 2],
+    uv: [f32; 2],
+}
+
 impl ParticlesRenderer {
     fn new(device: &wgpu::Device, _width: u32, _height: u32) -> Result<Self, String> {
         const PARTICLE_COUNT: u32 = 2000;
@@ -720,6 +803,123 @@ impl ParticlesRenderer {
     }
 }
 
+impl ShaderPlaygroundRenderer {
+    fn new(device: &wgpu::Device) -> Result<Self, String> {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("flutter_wgpu_texture shader playground shader"),
+            source: wgpu::ShaderSource::Wgsl(SHADER_PLAYGROUND_SHADER.into()),
+        });
+        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("flutter_wgpu_texture shader playground uniforms"),
+            size: std::mem::size_of::<ShaderUniforms>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("flutter_wgpu_texture shader playground bind group layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("flutter_wgpu_texture shader playground bind group"),
+            layout: &bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            }],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("flutter_wgpu_texture shader playground pipeline layout"),
+            bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("flutter_wgpu_texture shader playground pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_main",
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<ShaderVertex>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2],
+                }],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Bgra8Unorm,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: Default::default(),
+            multiview: None,
+        });
+
+        let vertices = [
+            ShaderVertex {
+                position: [-1.0, -1.0],
+                uv: [0.0, 1.0],
+            },
+            ShaderVertex {
+                position: [1.0, -1.0],
+                uv: [1.0, 1.0],
+            },
+            ShaderVertex {
+                position: [1.0, 1.0],
+                uv: [1.0, 0.0],
+            },
+            ShaderVertex {
+                position: [-1.0, -1.0],
+                uv: [0.0, 1.0],
+            },
+            ShaderVertex {
+                position: [1.0, 1.0],
+                uv: [1.0, 0.0],
+            },
+            ShaderVertex {
+                position: [-1.0, 1.0],
+                uv: [0.0, 0.0],
+            },
+        ];
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("flutter_wgpu_texture shader playground vertices"),
+            contents: bytemuck::cast_slice(&vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        Ok(Self {
+            pipeline,
+            uniform_buffer,
+            bind_group,
+            vertex_buffer,
+            vertex_count: vertices.len() as u32,
+            time: 0.0,
+            speed: 1.0,
+            noise_scale: 2.4,
+            distortion: 1.0,
+            pointer: [0.5, 0.5, 0.0, 1.0],
+            primary_color: [1.0, 0.46, 0.16, 1.0],
+            secondary_color: [0.14, 0.77, 1.0, 1.0],
+        })
+    }
+}
+
 impl Renderer {
     fn new(width: u32, height: u32, scene_type: SceneType) -> Result<Self, String> {
         let ctx = device_context()?;
@@ -727,11 +927,17 @@ impl Renderer {
 
         let (depth_texture, depth_view) = create_depth_texture(device, width.max(1), height.max(1));
 
-        let (cube, particles) = match scene_type {
-            SceneType::Cube => (CubeRenderer::new(device)?, None),
+        let (cube, particles, shader_playground) = match scene_type {
+            SceneType::Cube => (CubeRenderer::new(device)?, None, None),
             SceneType::Particles => (
                 CubeRenderer::new(device)?,
                 Some(ParticlesRenderer::new(device, width, height)?),
+                None,
+            ),
+            SceneType::ShaderPlayground => (
+                CubeRenderer::new(device)?,
+                None,
+                Some(ShaderPlaygroundRenderer::new(device)?),
             ),
         };
 
@@ -745,6 +951,7 @@ impl Renderer {
             scene_type,
             cube,
             particles,
+            shader_playground,
             animation_running: true,
             last_frame_at: Instant::now(),
             clear_color: [0.05, 0.1, 0.15, 1.0],
@@ -848,6 +1055,15 @@ impl Renderer {
                 _ => {}
             }
         }
+        if let Some(ref mut shader) = self.shader_playground {
+            match key {
+                "speed" => shader.speed = value,
+                "noise_scale" => shader.noise_scale = value,
+                "distortion" => shader.distortion = value,
+                "time" => shader.time = value,
+                _ => {}
+            }
+        }
     }
 
     fn set_vec4_param(&mut self, key: &str, value: [f32; 4]) {
@@ -865,6 +1081,14 @@ impl Renderer {
             match key {
                 "color1" => particles.color1 = value,
                 "color2" => particles.color2 = value,
+                _ => {}
+            }
+        }
+        if let Some(ref mut shader) = self.shader_playground {
+            match key {
+                "primary_color" => shader.primary_color = value,
+                "secondary_color" => shader.secondary_color = value,
+                "pointer" => shader.pointer = value,
                 _ => {}
             }
         }
@@ -886,6 +1110,15 @@ impl Renderer {
                 particles.motion_scale = 1.0;
                 particles.color1 = [1.0, 0.4, 0.1, 1.0];
                 particles.color2 = [0.1, 0.6, 1.0, 1.0];
+            }
+            if let Some(ref mut shader) = self.shader_playground {
+                shader.time = 0.0;
+                shader.speed = 1.0;
+                shader.noise_scale = 2.4;
+                shader.distortion = 1.0;
+                shader.pointer = [0.5, 0.5, 0.0, 1.0];
+                shader.primary_color = [1.0, 0.46, 0.16, 1.0];
+                shader.secondary_color = [0.14, 0.77, 1.0, 1.0];
             }
         }
     }
@@ -918,6 +1151,9 @@ impl Renderer {
             }
             SceneType::Particles => {
                 self.render_particles(&mut encoder, view, dt)?;
+            }
+            SceneType::ShaderPlayground => {
+                self.render_shader_playground(&mut encoder, view, dt)?;
             }
         }
 
@@ -1057,6 +1293,64 @@ impl Renderer {
         pass.set_bind_group(0, &particles.bind_group, &[]);
         pass.set_vertex_buffer(0, particles.vertex_buffer.slice(..));
         pass.draw(0..particles.vertex_count, 0..1);
+        Ok(())
+    }
+
+    fn render_shader_playground(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        dt: f32,
+    ) -> Result<(), String> {
+        let shader = self.shader_playground.as_mut().unwrap();
+        if self.animation_running {
+            shader.time += dt;
+        }
+
+        let uniforms = ShaderUniforms {
+            viewport: [
+                self.width as f32,
+                self.height as f32,
+                shader.time,
+                shader.speed,
+            ],
+            pointer: [
+                shader.pointer[0],
+                shader.pointer[1],
+                shader.pointer[2],
+                shader.distortion,
+            ],
+            tuning: [shader.noise_scale, 0.0, 0.0, 0.0],
+            primary_color: shader.primary_color,
+            secondary_color: shader.secondary_color,
+        };
+        self.ctx
+            .queue
+            .write_buffer(&shader.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
+
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("flutter_wgpu_texture shader playground render pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color {
+                        r: self.clear_color[0] as f64,
+                        g: self.clear_color[1] as f64,
+                        b: self.clear_color[2] as f64,
+                        a: self.clear_color[3] as f64,
+                    }),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            occlusion_query_set: None,
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(&shader.pipeline);
+        pass.set_bind_group(0, &shader.bind_group, &[]);
+        pass.set_vertex_buffer(0, shader.vertex_buffer.slice(..));
+        pass.draw(0..shader.vertex_count, 0..1);
         Ok(())
     }
 }

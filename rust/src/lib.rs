@@ -8,8 +8,13 @@ mod present;
 use std::ffi::c_void;
 
 #[no_mangle]
-pub extern "C" fn engine_create(width: u32, height: u32) -> u64 {
-    engine::engine_create(width, height).unwrap_or(0)
+pub extern "C" fn engine_create(width: u32, height: u32, scene_type: u8) -> u64 {
+    let scene = match scene_type {
+        1 => engine::SceneType::Cube,
+        2 => engine::SceneType::Particles,
+        _ => engine::SceneType::Cube,
+    };
+    engine::engine_create(width, height, scene).unwrap_or(0)
 }
 
 #[no_mangle]

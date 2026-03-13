@@ -78,6 +78,7 @@ abstract class RustLibApi extends BaseApi {
   RendererInfo crateApiCreateRenderer({
     required int width,
     required int height,
+    required String sceneType,
   });
 
   void crateApiDisposeRenderer({required BigInt handle});
@@ -127,6 +128,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   RendererInfo crateApiCreateRenderer({
     required int width,
     required int height,
+    required String sceneType,
   }) {
     return handler.executeSync(
       SyncTask(
@@ -134,6 +136,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_u_32(width, serializer);
           sse_encode_u_32(height, serializer);
+          sse_encode_String(sceneType, serializer);
           return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 1)!;
         },
         codec: SseCodec(
@@ -141,7 +144,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_String,
         ),
         constMeta: kCrateApiCreateRendererConstMeta,
-        argValues: [width, height],
+        argValues: [width, height, sceneType],
         apiImpl: this,
       ),
     );
@@ -149,7 +152,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   TaskConstMeta get kCrateApiCreateRendererConstMeta => const TaskConstMeta(
     debugName: "create_renderer",
-    argNames: ["width", "height"],
+    argNames: ["width", "height", "sceneType"],
   );
 
   @override

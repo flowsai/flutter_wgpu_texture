@@ -98,10 +98,8 @@ fn query_drm_format_modifiers(
     }
 
     let mut modifiers = vec![vk::DrmFormatModifierPropertiesEXT::default(); count];
-    let mut modifier_list =
-        vk::DrmFormatModifierPropertiesListEXT::builder().drm_format_modifier_properties(
-            &mut modifiers,
-        );
+    let mut modifier_list = vk::DrmFormatModifierPropertiesListEXT::builder()
+        .drm_format_modifier_properties(&mut modifiers);
     let mut format_properties = vk::FormatProperties2::builder().push_next(&mut modifier_list);
     unsafe {
         raw_instance.get_physical_device_format_properties2(
@@ -124,7 +122,13 @@ fn query_drm_format_modifiers(
         );
     }
 
-    modifiers.sort_by_key(|modifier| if modifier.drm_format_modifier == 0 { 1 } else { 0 });
+    modifiers.sort_by_key(|modifier| {
+        if modifier.drm_format_modifier == 0 {
+            1
+        } else {
+            0
+        }
+    });
     Ok(modifiers)
 }
 

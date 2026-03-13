@@ -29,7 +29,7 @@ static DEVICE_CONTEXT: OnceLock<Result<EngineDeviceContext, String>> = OnceLock:
 static RENDERERS: OnceLock<Mutex<HashMap<u64, Arc<Mutex<Renderer>>>>> = OnceLock::new();
 static NEXT_HANDLE: OnceLock<Mutex<u64>> = OnceLock::new();
 
-const SHADER: &str = r#"
+const CUBE_SHADER: &str = r#"
 struct Uniforms {
   mvp: mat4x4<f32>,
   model: mat4x4<f32>,
@@ -67,6 +67,57 @@ fn fs_main(input: VsOut) -> @location(0) vec4<f32> {
 }
 "#;
 
+const PARTICLES_SHADER: &str = r#"
+struct ParticleUniforms {
+  viewport: vec4<f32>,
+  dynamics: vec4<f32>,
+  color1: vec4<f32>,
+  color2: vec4<f32>,
+};
+
+@group(0) @binding(0)
+var<uniform> uniforms: ParticleUniforms;
+
+struct QuadIn {
+  @location(0) corner: vec2<f32>,
+  @location(1) position: vec2<f32>,
+  @location(2) velocity: vec2<f32>,
+  @location(3) life: f32,
+  @location(4) seed: f32,
+};
+
+struct VsOut {
+  @builtin(position) position: vec4<f32>,
+  @location(0) life: f32,
+  @location(1) local: vec2<f32>,
+};
+
+@vertex
+fn vs_main(input: QuadIn) -> VsOut {
+  var out: VsOut;
+  let t = uniforms.viewport.z * (0.45 + input.seed * 1.35);
+  let spiral = vec2<f32>(cos(t * 0.9 + input.seed * 11.0), sin(t * 1.1 + input.seed * 7.0));
+  let drift = input.velocity * sin(t * 1.7 + input.seed * 9.0) * 140.0 * uniforms.dynamics.x;
+  let pulse = spiral * (14.0 + 22.0 * input.life) * uniforms.dynamics.x;
+  let center = uniforms.viewport.xy * 0.5 + input.position + drift + pulse;
+  let size = uniforms.viewport.w * (0.85 + input.life * 1.35);
+  let world = center + input.corner * size;
+  let ndc_pos = world / uniforms.viewport.xy * 2.0 - 1.0;
+  out.position = vec4<f32>(ndc_pos.x, -ndc_pos.y, 0.0, 1.0);
+  out.life = input.life;
+  out.local = input.corner;
+  return out;
+}
+
+@fragment
+fn fs_main(input: VsOut) -> @location(0) vec4<f32> {
+  let radius = length(input.local);
+  let mask = 1.0 - smoothstep(0.0, 1.0, radius);
+  let alpha = mask;
+  return vec4<f32>(1.0, 1.0, 1.0, alpha);
+}
+"#;
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Vertex {
@@ -83,6 +134,41 @@ struct Uniforms {
     clear_color: [f32; 4],
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct ParticleUniforms {
+    viewport: [f32; 4],
+    dynamics: [f32; 4],
+    color1: [f32; 4],
+    color2: [f32; 4],
+}
+
+struct CubeRenderer {
+    pipeline: wgpu::RenderPipeline,
+    uniform_buffer: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+    vertex_buffer: wgpu::Buffer,
+    index_buffer: wgpu::Buffer,
+    index_count: u32,
+    rotation_enabled: bool,
+    rotation_speed: f32,
+    angle: f32,
+    cube_color: [f32; 4],
+}
+
+struct ParticlesRenderer {
+    pipeline: wgpu::RenderPipeline,
+    uniform_buffer: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+    vertex_buffer: wgpu::Buffer,
+    vertex_count: u32,
+    time: f32,
+    point_size: f32,
+    motion_scale: f32,
+    color1: [f32; 4],
+    color2: [f32; 4],
+}
+
 struct EngineDeviceContext {
     device: Arc<wgpu::Device>,
     queue: Arc<wgpu::Queue>,
@@ -94,6 +180,12 @@ struct EngineDeviceContext {
     mtl_device_ptr: usize,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SceneType {
+    Cube,
+    Particles,
+}
+
 pub(crate) struct Renderer {
     ctx: &'static EngineDeviceContext,
     width: u32,
@@ -101,18 +193,11 @@ pub(crate) struct Renderer {
     present: Option<PresentTextureTarget>,
     depth_texture: wgpu::Texture,
     depth_view: wgpu::TextureView,
-    pipeline: wgpu::RenderPipeline,
-    uniform_buffer: wgpu::Buffer,
-    bind_group: wgpu::BindGroup,
-    vertex_buffer: wgpu::Buffer,
-    index_buffer: wgpu::Buffer,
-    index_count: u32,
+    scene_type: SceneType,
+    cube: CubeRenderer,
+    particles: Option<ParticlesRenderer>,
     animation_running: bool,
-    rotation_enabled: bool,
-    rotation_speed: f32,
-    angle: f32,
     last_frame_at: Instant,
-    cube_color: [f32; 4],
     clear_color: [f32; 4],
 }
 
@@ -394,23 +479,20 @@ fn create_depth_texture(
     (depth, view)
 }
 
-impl Renderer {
-    fn new(width: u32, height: u32) -> Result<Self, String> {
-        let ctx = device_context()?;
-        let device = ctx.device.as_ref();
-
+impl CubeRenderer {
+    fn new(device: &wgpu::Device) -> Result<Self, String> {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("flutter_wgpu_texture shader"),
-            source: wgpu::ShaderSource::Wgsl(SHADER.into()),
+            label: Some("flutter_wgpu_texture cube shader"),
+            source: wgpu::ShaderSource::Wgsl(CUBE_SHADER.into()),
         });
         let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("flutter_wgpu_texture uniforms"),
+            label: Some("flutter_wgpu_texture cube uniforms"),
             size: std::mem::size_of::<Uniforms>() as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("flutter_wgpu_texture bind group layout"),
+            label: Some("flutter_wgpu_texture cube bind group layout"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
                 visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
@@ -423,7 +505,7 @@ impl Renderer {
             }],
         });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("flutter_wgpu_texture bind group"),
+            label: Some("flutter_wgpu_texture cube bind group"),
             layout: &bind_group_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
@@ -431,12 +513,12 @@ impl Renderer {
             }],
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("flutter_wgpu_texture pipeline layout"),
+            label: Some("flutter_wgpu_texture cube pipeline layout"),
             bind_group_layouts: &[&bind_group_layout],
             push_constant_ranges: &[],
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("flutter_wgpu_texture pipeline"),
+            label: Some("flutter_wgpu_texture cube pipeline"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
@@ -484,7 +566,174 @@ impl Renderer {
             contents: bytemuck::cast_slice(&indices),
             usage: wgpu::BufferUsages::INDEX,
         });
+
+        Ok(Self {
+            pipeline,
+            uniform_buffer,
+            bind_group,
+            vertex_buffer,
+            index_buffer,
+            index_count: indices.len() as u32,
+            rotation_enabled: true,
+            rotation_speed: 1.2,
+            angle: 0.0,
+            cube_color: [1.0, 0.9, 0.1, 1.0],
+        })
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct ParticleVertex {
+    corner: [f32; 2],
+    position: [f32; 2],
+    velocity: [f32; 2],
+    life: f32,
+    seed: f32,
+}
+
+impl ParticlesRenderer {
+    fn new(device: &wgpu::Device, _width: u32, _height: u32) -> Result<Self, String> {
+        const PARTICLE_COUNT: u32 = 2000;
+
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("flutter_wgpu_texture particles shader"),
+            source: wgpu::ShaderSource::Wgsl(PARTICLES_SHADER.into()),
+        });
+        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("flutter_wgpu_texture particles uniforms"),
+            size: std::mem::size_of::<ParticleUniforms>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("flutter_wgpu_texture particles bind group layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("flutter_wgpu_texture particles bind group"),
+            layout: &bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            }],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("flutter_wgpu_texture particles pipeline layout"),
+            bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("flutter_wgpu_texture particles pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_main",
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<ParticleVertex>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x2, 3 => Float32, 4 => Float32],
+                }],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Bgra8Unorm,
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::SrcAlpha,
+                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                        alpha: wgpu::BlendComponent::REPLACE,
+                    }),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: Default::default(),
+            multiview: None,
+        });
+
+        let corners = [
+            [-1.0, -1.0],
+            [1.0, -1.0],
+            [1.0, 1.0],
+            [-1.0, -1.0],
+            [1.0, 1.0],
+            [-1.0, 1.0],
+        ];
+        let mut particles = Vec::with_capacity(PARTICLE_COUNT as usize * 6);
+        for i in 0..PARTICLE_COUNT {
+            let angle = (i as f32 / PARTICLE_COUNT as f32) * std::f32::consts::PI * 2.0;
+            let band = i as f32 / PARTICLE_COUNT as f32;
+            let radius = 70.0 + band * 260.0;
+            let position = [angle.cos() * radius, angle.sin() * radius];
+            let velocity = [
+                angle.cos() * (0.45 + band * 0.9),
+                angle.sin() * (0.45 + band * 0.9),
+            ];
+            let life = band;
+            let seed = band.sqrt();
+            for corner in corners {
+                particles.push(ParticleVertex {
+                    corner,
+                    position,
+                    velocity,
+                    life,
+                    seed,
+                });
+            }
+        }
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("flutter_wgpu_texture particles vertices"),
+            contents: bytemuck::cast_slice(&particles),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        Ok(Self {
+            pipeline,
+            uniform_buffer,
+            bind_group,
+            vertex_buffer,
+            vertex_count: particles.len() as u32,
+            time: 0.0,
+            point_size: 14.0,
+            motion_scale: 1.0,
+            color1: [1.0, 0.4, 0.1, 1.0],
+            color2: [0.1, 0.6, 1.0, 1.0],
+        })
+    }
+}
+
+impl Renderer {
+    fn new(width: u32, height: u32, scene_type: SceneType) -> Result<Self, String> {
+        let ctx = device_context()?;
+        let device = ctx.device.as_ref();
+
         let (depth_texture, depth_view) = create_depth_texture(device, width.max(1), height.max(1));
+
+        let (cube, particles) = match scene_type {
+            SceneType::Cube => (CubeRenderer::new(device)?, None),
+            SceneType::Particles => (
+                CubeRenderer::new(device)?,
+                Some(ParticlesRenderer::new(device, width, height)?),
+            ),
+        };
 
         Ok(Self {
             ctx,
@@ -493,19 +742,12 @@ impl Renderer {
             present: None,
             depth_texture,
             depth_view,
-            pipeline,
-            uniform_buffer,
-            bind_group,
-            vertex_buffer,
-            index_buffer,
-            index_count: indices.len() as u32,
+            scene_type,
+            cube,
+            particles,
             animation_running: true,
-            rotation_enabled: true,
-            rotation_speed: 1.2,
-            angle: 0.0,
             last_frame_at: Instant::now(),
-            cube_color: [1.0, 0.9, 0.1, 1.0],
-            clear_color: [0.05, 0.2, 0.85, 1.0],
+            clear_color: [0.05, 0.1, 0.15, 1.0],
         })
     }
 
@@ -579,65 +821,89 @@ impl Renderer {
 
     fn set_bool_param(&mut self, key: &str, value: bool) {
         match key {
-            "rotation_enabled" => self.rotation_enabled = value,
             "animation_running" => self.animation_running = value,
             _ => {}
+        }
+        if self.particles.is_some() {
+            match key {
+                "animation_running" => self.animation_running = value,
+                _ => {}
+            }
         }
     }
 
     fn set_float_param(&mut self, key: &str, value: f32) {
-        match key {
-            "rotation_speed" => self.rotation_speed = value,
-            "angle" => self.angle = value,
-            _ => {}
+        if let Some(ref mut cube) = Some(&mut self.cube) {
+            match key {
+                "rotation_speed" => cube.rotation_speed = value,
+                "angle" => cube.angle = value,
+                _ => {}
+            }
+        }
+        if let Some(ref mut particles) = self.particles {
+            match key {
+                "point_size" => particles.point_size = value,
+                "motion_scale" => particles.motion_scale = value,
+                "time" => particles.time = value,
+                _ => {}
+            }
         }
     }
 
     fn set_vec4_param(&mut self, key: &str, value: [f32; 4]) {
         match key {
-            "cube_color" => self.cube_color = value,
             "background_color" => self.clear_color = value,
             _ => {}
+        }
+        if let Some(ref mut cube) = Some(&mut self.cube) {
+            match key {
+                "cube_color" => cube.cube_color = value,
+                _ => {}
+            }
+        }
+        if let Some(ref mut particles) = self.particles {
+            match key {
+                "color1" => particles.color1 = value,
+                "color2" => particles.color2 = value,
+                _ => {}
+            }
         }
     }
 
     fn invoke_command(&mut self, command: &str, _payload: &str) {
         if command == "reset_scene" {
             self.animation_running = true;
-            self.rotation_enabled = true;
-            self.rotation_speed = 1.2;
-            self.angle = 0.0;
-            self.cube_color = [1.0, 0.9, 0.1, 1.0];
-            self.clear_color = [0.05, 0.2, 0.85, 1.0];
+            self.clear_color = [0.05, 0.1, 0.15, 1.0];
+            if let Some(ref mut cube) = Some(&mut self.cube) {
+                cube.rotation_enabled = true;
+                cube.rotation_speed = 1.2;
+                cube.angle = 0.0;
+                cube.cube_color = [1.0, 0.9, 0.1, 1.0];
+            }
+            if let Some(ref mut particles) = self.particles {
+                particles.time = 0.0;
+                particles.point_size = 14.0;
+                particles.motion_scale = 1.0;
+                particles.color1 = [1.0, 0.4, 0.1, 1.0];
+                particles.color2 = [0.1, 0.6, 1.0, 1.0];
+            }
         }
     }
 
     fn render(&mut self) -> Result<bool, String> {
-        let Some(target) = self.present.as_ref() else {
+        let Some(target) = self.present.take() else {
             return Ok(false);
         };
+        let texture = target.render_texture();
+        let view = &target.render_view;
+        let width = target.width;
+        let height = target.height;
+
         let now = Instant::now();
         let dt = now
             .saturating_duration_since(self.last_frame_at)
             .as_secs_f32();
         self.last_frame_at = now;
-        if self.animation_running && self.rotation_enabled {
-            self.angle += dt * self.rotation_speed;
-        }
-
-        let aspect = (self.width.max(1) as f32) / (self.height.max(1) as f32);
-        let model = Mat4::from_rotation_x(0.65) * Mat4::from_rotation_y(self.angle);
-        let view = Mat4::look_at_rh(Vec3::new(0.0, 0.0, 4.6), Vec3::ZERO, Vec3::Y);
-        let proj = Mat4::perspective_rh_gl(45f32.to_radians(), aspect, 0.1, 100.0);
-        let uniforms = Uniforms {
-            mvp: (proj * view * model).to_cols_array_2d(),
-            model: model.to_cols_array_2d(),
-            cube_color: self.cube_color,
-            clear_color: self.clear_color,
-        };
-        self.ctx
-            .queue
-            .write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
 
         let mut encoder = self
             .ctx
@@ -645,44 +911,20 @@ impl Renderer {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("flutter_wgpu_texture frame"),
             });
-        {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("flutter_wgpu_texture render pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &target.render_view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: self.clear_color[0] as f64,
-                            g: self.clear_color[1] as f64,
-                            b: self.clear_color[2] as f64,
-                            a: self.clear_color[3] as f64,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.depth_view,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
-                        store: wgpu::StoreOp::Store,
-                    }),
-                    stencil_ops: None,
-                }),
-                occlusion_query_set: None,
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(&self.pipeline);
-            pass.set_bind_group(0, &self.bind_group, &[]);
-            pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            pass.draw_indexed(0..self.index_count, 0, 0..1);
+
+        match self.scene_type {
+            SceneType::Cube => {
+                self.render_cube(&mut encoder, view, dt)?;
+            }
+            SceneType::Particles => {
+                self.render_particles(&mut encoder, view, dt)?;
+            }
         }
 
         if let Some(shared) = target.shared_texture() {
             encoder.copy_texture_to_texture(
                 wgpu::ImageCopyTexture {
-                    texture: target.render_texture(),
+                    texture,
                     mip_level: 0,
                     origin: wgpu::Origin3d::ZERO,
                     aspect: wgpu::TextureAspect::All,
@@ -694,8 +936,8 @@ impl Renderer {
                     aspect: wgpu::TextureAspect::All,
                 },
                 wgpu::Extent3d {
-                    width: target.width,
-                    height: target.height,
+                    width,
+                    height,
                     depth_or_array_layers: 1,
                 },
             );
@@ -703,12 +945,124 @@ impl Renderer {
 
         self.ctx.queue.submit(Some(encoder.finish()));
         self.ctx.device.poll(wgpu::Maintain::Wait);
+        self.present = Some(target);
         Ok(true)
+    }
+
+    fn render_cube(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        dt: f32,
+    ) -> Result<(), String> {
+        let cube = &mut self.cube;
+        if self.animation_running && cube.rotation_enabled {
+            cube.angle += dt * cube.rotation_speed;
+        }
+
+        let aspect = (self.width.max(1) as f32) / (self.height.max(1) as f32);
+        let model = Mat4::from_rotation_x(0.65) * Mat4::from_rotation_y(cube.angle);
+        let camera = Mat4::look_at_rh(Vec3::new(0.0, 0.0, 4.6), Vec3::ZERO, Vec3::Y);
+        let proj = Mat4::perspective_rh_gl(45f32.to_radians(), aspect, 0.1, 100.0);
+        let uniforms = Uniforms {
+            mvp: (proj * camera * model).to_cols_array_2d(),
+            model: model.to_cols_array_2d(),
+            cube_color: cube.cube_color,
+            clear_color: self.clear_color,
+        };
+        self.ctx
+            .queue
+            .write_buffer(&cube.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
+
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("flutter_wgpu_texture cube render pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color {
+                        r: self.clear_color[0] as f64,
+                        g: self.clear_color[1] as f64,
+                        b: self.clear_color[2] as f64,
+                        a: self.clear_color[3] as f64,
+                    }),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &self.depth_view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            occlusion_query_set: None,
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(&cube.pipeline);
+        pass.set_bind_group(0, &cube.bind_group, &[]);
+        pass.set_vertex_buffer(0, cube.vertex_buffer.slice(..));
+        pass.set_index_buffer(cube.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+        pass.draw_indexed(0..cube.index_count, 0, 0..1);
+        Ok(())
+    }
+
+    fn render_particles(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        dt: f32,
+    ) -> Result<(), String> {
+        let particles = self.particles.as_mut().unwrap();
+        if self.animation_running {
+            particles.time += dt;
+        }
+
+        let uniforms = ParticleUniforms {
+            viewport: [
+                self.width as f32,
+                self.height as f32,
+                particles.time,
+                particles.point_size,
+            ],
+            dynamics: [particles.motion_scale, 0.0, 0.0, 0.0],
+            color1: particles.color1,
+            color2: particles.color2,
+        };
+        self.ctx
+            .queue
+            .write_buffer(&particles.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
+
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("flutter_wgpu_texture particles render pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color {
+                        r: self.clear_color[0] as f64,
+                        g: self.clear_color[1] as f64,
+                        b: self.clear_color[2] as f64,
+                        a: self.clear_color[3] as f64,
+                    }),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            occlusion_query_set: None,
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(&particles.pipeline);
+        pass.set_bind_group(0, &particles.bind_group, &[]);
+        pass.set_vertex_buffer(0, particles.vertex_buffer.slice(..));
+        pass.draw(0..particles.vertex_count, 0..1);
+        Ok(())
     }
 }
 
-pub(crate) fn engine_create(width: u32, height: u32) -> Result<u64, String> {
-    let renderer = Renderer::new(width.max(1), height.max(1))?;
+pub(crate) fn engine_create(width: u32, height: u32, scene_type: SceneType) -> Result<u64, String> {
+    let renderer = Renderer::new(width.max(1), height.max(1), scene_type)?;
     let handle = next_handle();
     renderers()
         .lock()

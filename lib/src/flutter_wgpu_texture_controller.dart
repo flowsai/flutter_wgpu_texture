@@ -10,9 +10,13 @@ import 'rust/api.dart' as rust_api;
 import 'rust/rust_init.dart';
 
 class FlutterWgpuTextureController extends ChangeNotifier {
-  FlutterWgpuTextureController({this.autoStart = true});
+  FlutterWgpuTextureController({
+    this.autoStart = true,
+    this.sceneType = 'cube',
+  });
 
   final bool autoStart;
+  final String sceneType;
   final String surfaceId = _makeSurfaceId();
 
   int? _textureId;
@@ -47,7 +51,11 @@ class FlutterWgpuTextureController extends ChangeNotifier {
     }
 
     await ensureRustInitialized();
-    final renderer = rust_api.createRenderer(width: targetWidth, height: targetHeight);
+    final renderer = rust_api.createRenderer(
+      width: targetWidth,
+      height: targetHeight,
+      sceneType: sceneType,
+    );
     _handle = renderer.handle;
     _backendInfo = renderer.backend;
     final surface = await FlutterWgpuPlatformChannel.createSurface(
@@ -150,7 +158,10 @@ class FlutterWgpuTextureController extends ChangeNotifier {
     await _pumpFrame();
   }
 
-  Future<void> invokeRustCommand(String command, {String payload = '{}'}) async {
+  Future<void> invokeRustCommand(
+    String command, {
+    String payload = '{}',
+  }) async {
     final handle = _handle;
     if (handle == null) return;
     rust_api.invokeCommand(handle: handle, command: command, payload: payload);
@@ -174,9 +185,19 @@ class FlutterWgpuTextureController extends ChangeNotifier {
       if (rendered && _textureId != null) {
         await FlutterWgpuPlatformChannel.markFrameAvailable(surfaceId);
       }
+    } catch (error) {
+      // Surface attachment can lag slightly behind controller startup on desktop.
+      // Treat this as a dropped frame instead of surfacing an unhandled exception.
+      if (!_isTransientPresentTargetError(error)) {
+        rethrow;
+      }
     } finally {
       _frameInFlight = false;
     }
+  }
+
+  bool _isTransientPresentTargetError(Object error) {
+    return error.toString().contains('no present target');
   }
 
   static List<double> _colorToVec4(Color color) {

@@ -68,9 +68,10 @@ fn wire__crate__api__create_renderer_impl(
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
             let api_width = <u32>::sse_decode(&mut deserializer);
             let api_height = <u32>::sse_decode(&mut deserializer);
+            let api_scene_type = <String>::sse_decode(&mut deserializer);
             deserializer.end();
             transform_result_sse::<_, String>((move || {
-                let output_ok = crate::api::create_renderer(api_width, api_height)?;
+                let output_ok = crate::api::create_renderer(api_width, api_height, api_scene_type)?;
                 Ok(output_ok)
             })())
         },

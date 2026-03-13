@@ -16,8 +16,16 @@ pub struct RendererInfo {
 }
 
 #[frb(sync)]
-pub fn create_renderer(width: u32, height: u32) -> Result<RendererInfo, String> {
-    let handle = engine::engine_create(width, height)?;
+pub fn create_renderer(
+    width: u32,
+    height: u32,
+    scene_type: String,
+) -> Result<RendererInfo, String> {
+    let scene = match scene_type.as_str() {
+        "particles" => engine::SceneType::Particles,
+        _ => engine::SceneType::Cube,
+    };
+    let handle = engine::engine_create(width, height, scene)?;
     let backend = engine::renderer_backend_info(handle)?;
     Ok(RendererInfo { handle, backend })
 }

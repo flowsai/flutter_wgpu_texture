@@ -1,4 +1,7 @@
 # flutter_wgpu_texture
+![screenshot-wgpu-texture](https://i.imgur.com/LvecF8R.png)
+[cube demo code available here](./examples/spinning_cube)
+
 
 Desktop Flutter texture plugin powered by Rust and `wgpu`.
 

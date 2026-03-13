@@ -22,6 +22,8 @@ class FlutterWgpuTexture extends StatefulWidget {
 
 class _FlutterWgpuTextureState extends State<FlutterWgpuTexture>
     with SingleTickerProviderStateMixin {
+  Size? _lastSize;
+
   @override
   void initState() {
     super.initState();
@@ -48,10 +50,15 @@ class _FlutterWgpuTextureState extends State<FlutterWgpuTexture>
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = widget.width ?? _fallbackDimension(constraints.maxWidth);
-        final height = widget.height ?? _fallbackDimension(constraints.maxHeight);
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          widget.controller.ensureInitialized(Size(width, height), this);
-        });
+        final height =
+            widget.height ?? _fallbackDimension(constraints.maxHeight);
+        final size = Size(width, height);
+        if (_lastSize != size) {
+          _lastSize = size;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            widget.controller.ensureInitialized(size, this);
+          });
+        }
         final textureId = widget.controller.textureId;
         if (textureId == null) {
           return SizedBox(
@@ -59,7 +66,10 @@ class _FlutterWgpuTextureState extends State<FlutterWgpuTexture>
             height: height,
             child:
                 widget.placeholder ??
-                const ColoredBox(color: Colors.black12, child: SizedBox.expand()),
+                const ColoredBox(
+                  color: Colors.black12,
+                  child: SizedBox.expand(),
+                ),
           );
         }
         return SizedBox(

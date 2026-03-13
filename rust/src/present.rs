@@ -1,23 +1,21 @@
-use std::sync::Arc;
-
-#[cfg(any(target_os = "macos", target_os = "ios"))]
-use std::ffi::c_void;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 use metal::foreign_types::ForeignType;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 use metal::MTLTextureType;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
-use wgpu_hal::{api::Metal, CopyExtent};
+use std::ffi::c_void;
 #[cfg(target_os = "windows")]
 use wgpu_hal::api::Dx12;
 #[cfg(target_os = "windows")]
 use wgpu_hal::dx12;
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+use wgpu_hal::{api::Metal, CopyExtent};
 #[cfg(target_os = "windows")]
 use winapi::shared::{dxgiformat, dxgitype};
 #[cfg(target_os = "windows")]
-use winapi::Interface as _;
-#[cfg(target_os = "windows")]
 use winapi::um::{d3d12 as d3d12_ty, handleapi::CloseHandle, winnt};
+#[cfg(target_os = "windows")]
+use winapi::Interface as _;
 
 #[cfg(target_os = "linux")]
 use crate::linux_dma_buf::{create_shared_texture, OwnedDmaBufImage};
@@ -194,7 +192,10 @@ pub(crate) fn create_dxgi_shared_present_target(
                     DepthOrArraySize: 1,
                     MipLevels: 1,
                     Format: dxgiformat::DXGI_FORMAT_B8G8R8A8_UNORM,
-                    SampleDesc: dxgitype::DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
+                    SampleDesc: dxgitype::DXGI_SAMPLE_DESC {
+                        Count: 1,
+                        Quality: 0,
+                    },
                     Layout: d3d12_ty::D3D12_TEXTURE_LAYOUT_UNKNOWN,
                     Flags: d3d12_ty::D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET
                         | d3d12_ty::D3D12_RESOURCE_FLAG_ALLOW_SIMULTANEOUS_ACCESS,
@@ -210,9 +211,7 @@ pub(crate) fn create_dxgi_shared_present_target(
                     resource.mut_void(),
                 );
                 if hr < 0 || resource.is_null() {
-                    return Err(format!(
-                        "dx12 CreateCommittedResource failed: 0x{hr:08X}"
-                    ));
+                    return Err(format!("dx12 CreateCommittedResource failed: 0x{hr:08X}"));
                 }
 
                 let mut handle: winnt::HANDLE = std::ptr::null_mut();

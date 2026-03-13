@@ -1,38 +1,40 @@
 # Extending Rust Logic
 
 The package is designed so you can add Rust-side rendering logic without
-rewriting the Flutter texture plumbing.
+touching the Flutter texture plumbing or the native platform bridge.
 
-## Use the generic controller methods first
+## Start with the generic controller API
 
-`FlutterWgpuTextureController` already exposes:
+`FlutterWgpuTextureController` already exposes a generic command bridge:
 
-- `setBoolParam(key, value)`
-- `setFloatParam(key, value)`
-- `setVec4Param(key, value)`
-- `invokeRustCommand(command, payload: '{}')`
+```dart
+await controller.setFloatParam('key', 1.0);
+await controller.setBoolParam('key', true);
+await controller.setVec4Param('key', [r, g, b, a]);
+await controller.invokeRustCommand('command', payload: '{"value":1}');
+```
 
-If the Rust renderer already understands a key or command, you do not need any
-new Dart API.
+If the Rust renderer already handles the key or command, no new Dart code is
+needed.
 
-## Add a new parameter to an existing scene
+## Add a parameter to an existing scene
 
-1. Add the new field to the relevant scene renderer state in `rust/src/engine.rs`.
-2. Route the value in one of:
-   - `Renderer::set_bool_param`
+1. Add the field to the scene state struct in `rust/src/engine.rs`.
+2. Route the incoming value in the appropriate `Renderer` setter:
    - `Renderer::set_float_param`
+   - `Renderer::set_bool_param`
    - `Renderer::set_vec4_param`
-3. Consume the field in the relevant scene render function.
+3. Use the field in the scene's render function.
 
-Examples already in the engine:
+Call it from Dart immediately — no binding regeneration required:
 
-- `rotation_speed` for `Cube`
-- `point_size` / `motion_scale` for `Particles`
-- `speed` / `noise_scale` / `distortion` for `ShaderPlayground`
+```dart
+await controller.setFloatParam('your_new_param', 0.5);
+```
 
 ## Add a new command
 
-1. Add a branch in `Renderer::invoke_command`.
+1. Add a branch in `Renderer::invoke_command` in `rust/src/engine.rs`.
 2. Update the appropriate scene state.
 3. Call it from Dart:
 
@@ -42,31 +44,36 @@ await controller.invokeRustCommand('your_command', payload: '{"value":1}');
 
 ## Add a new built-in scene
 
-1. Add a new variant to `SceneType` in `rust/src/engine.rs`.
-2. Add scene-specific state and a constructor.
-3. Instantiate it from `Renderer::new`.
-4. Add a render function and dispatch to it from `Renderer::render`.
-5. Route scene-specific params in the generic setter methods.
-6. Map the public Dart `sceneType` string to the Rust enum in
+1. Add a variant to `SceneType` in `rust/src/engine.rs`.
+2. Add the scene state struct and a constructor.
+3. Instantiate it in `Renderer::new` based on the incoming scene type string.
+4. Add the scene render function and dispatch to it from `Renderer::render`.
+5. Route scene-specific params in `set_float_param` / `set_vec4_param` etc.
+6. Map the public `sceneType` string to the new enum variant in
    `rust/src/api/mod.rs`.
 
-## Add a typed Dart helper
-
-Once a param or command becomes stable, add a convenience method on
-`FlutterWgpuTextureController`.
-
-Example:
+Then use it from Dart:
 
 ```dart
-Future<void> setExposure(double value) {
-  return setFloatParam('exposure', value);
-}
+final controller = FlutterWgpuTextureController(sceneType: 'your_scene');
 ```
 
-## Regenerate FRB bindings
+## Add a typed Dart convenience method
 
-When `rust/src/api/mod.rs` changes, regenerate bindings from the package root:
+Once a param stabilises, wrap it on the controller for better autocompletion
+and type safety:
+
+```dart
+Future<void> setExposure(double value) => setFloatParam('exposure', value);
+```
+
+## Regenerate FFI bindings
+
+Only needed when the public surface of `rust/src/api/mod.rs` changes
+(new exported functions, changed signatures). Run from the package root:
 
 ```bash
 flutter_rust_bridge_codegen generate
 ```
+
+Parameter keys and command strings do not require regeneration.

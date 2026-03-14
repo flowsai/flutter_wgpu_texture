@@ -12,10 +12,9 @@ platforms:
   windows:
 
 topics:
-  - flutter
   - wgpu
   - bevy
-  - graphics
+  - graphics-2d
   - graphics-3d
   - webgpu
 

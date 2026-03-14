@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  dart:
+    name: Dart analysis & tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
+
+      - name: Verify pub package
+        run: dart pub publish --dry-run
+
+  rust:
+    name: Rust checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Check plugin crate
+        run: cargo check --manifest-path rust/Cargo.toml --target x86_64-unknown-linux-gnu
+
+      - name: Check core crate
+        run: cargo check --manifest-path rust_core/Cargo.toml
+
+      - name: Clippy (core)
+        run: cargo clippy --manifest-path rust_core/Cargo.toml -- -D warnings
+
+  rust-macos:
+    name: Rust checks (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Check plugin crate
+        run: cargo check --manifest-path rust/Cargo.toml --target aarch64-apple-darwin
+
+      - name: Check core crate
+        run: cargo check --manifest-path rust_core/Cargo.toml

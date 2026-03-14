@@ -277,7 +277,7 @@ and the factory is available when Dart calls `create_renderer`.
 
 ## Reference implementation
 
-[`example/custom_scene/`](../example/custom_scene) is a complete working
+[`examples/custom_scene/`](../examples/custom_scene) is a complete working
 example: an animated gradient with color and pause controls, built exactly as
 described above.
 

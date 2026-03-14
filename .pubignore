@@ -1,0 +1,14 @@
+# Additional examples (beyond the canonical example/)
+examples/
+
+# Rust build artifacts
+rust/target/
+rust_core/target/
+
+# Flutter/Dart build artifacts
+example/build/
+.dart_tool/
+coverage/
+
+# Development-only files
+.github/

@@ -36,3 +36,7 @@ migrate_working_dir/
 rust/target/
 rust_core/target/
 examples/*/rust/target/
+
+# Example build outputs
+example/build/
+examples/*/build/

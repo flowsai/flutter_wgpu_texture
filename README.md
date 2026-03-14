@@ -57,13 +57,13 @@ See the [API reference](https://pub.dev/documentation/flutter_wgpu_texture) for 
 
 | Example | Description |
 |---------|-------------|
-| [spinning_cube](./example/spinning_cube) | Rotating 3D cube with color controls |
-| [particles](./example/particles) | Particle scene with size and motion controls |
-| [shader_playground](./example/shader_playground) | Live WGSL shader editor with uniform sliders |
-| [custom_scene](./example/custom_scene) | Animated gradient — custom scene outside the plugin |
+| [spinning_cube](./example) | Rotating 3D cube with color controls |
+| [particles](./examples/particles) | Particle scene with size and motion controls |
+| [shader_playground](./examples/shader_playground) | Live WGSL shader editor with uniform sliders |
+| [custom_scene](./examples/custom_scene) | Animated gradient — custom scene outside the plugin |
 
 ```bash
-cd example/spinning_cube
+cd example          # spinning_cube (canonical pub.dev example)
 flutter pub get
 flutter run -d macos  # or windows / linux
 ```
@@ -82,7 +82,7 @@ into a single replacement dylib.  Your scene self-registers via `#[ctor::ctor]`
 at load time, and Dart selects it with `sceneType: 'my_scene'`.
 
 See **[doc/custom_scene.md](./doc/custom_scene.md)** for the step-by-step
-guide and **[example/custom_scene/](./example/custom_scene)** for a complete
+guide and **[examples/custom_scene/](./examples/custom_scene)** for a complete
 reference implementation (animated gradient with runtime colour controls).
 
 ## Architecture

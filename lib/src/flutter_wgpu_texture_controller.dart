@@ -1,111 +1,61 @@
 import 'dart:async';
-import 'dart:io';
-import 'dart:math' as math;
+import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
-import 'dart:ui';
 
-import 'platform_channel.dart';
+import 'renderer/flutter_wgpu_texture_backend.dart';
+import 'renderer/flutter_wgpu_texture_backend_stub.dart'
+    if (dart.library.js_interop) 'renderer/flutter_wgpu_texture_backend_web.dart'
+    if (dart.library.io) 'renderer/flutter_wgpu_texture_backend_desktop.dart';
 import 'rust/api.dart' as rust_api;
-import 'rust/rust_init.dart';
 
 class FlutterWgpuTextureController extends ChangeNotifier {
   FlutterWgpuTextureController({
     this.autoStart = true,
     this.sceneType = 'cube',
-  });
+  }) : _backend = createFlutterWgpuTextureBackend(
+         autoStart: autoStart,
+         sceneType: sceneType,
+         surfaceId: _makeSurfaceId(),
+       );
 
   final bool autoStart;
   final String sceneType;
-  final String surfaceId = _makeSurfaceId();
+  final FlutterWgpuTextureBackend _backend;
 
-  int? _textureId;
-  BigInt? _handle;
-  rust_api.BackendInfo? _backendInfo;
-  Ticker? _ticker;
-  bool _initialized = false;
-  bool _animating = false;
-  bool _frameInFlight = false;
-  Size? _size;
-
-  int? get textureId => _textureId;
-  bool get isInitialized => _initialized;
-  bool get isAnimating => _animating;
-  rust_api.BackendInfo? get backendInfo => _backendInfo;
-  Size? get size => _size;
-  BigInt? get handle => _handle;
+  int? get textureId => _backend.textureId;
+  String? get viewType => _backend.viewType;
+  bool get isInitialized => _backend.isInitialized;
+  bool get isAnimating => _backend.isAnimating;
+  rust_api.BackendInfo? get backendInfo => _backend.backendInfo;
+  Size? get size => _backend.size;
+  BigInt? get handle => _backend.handle;
+  String? get unsupportedReason => _backend.unsupportedReason;
 
   Future<void> ensureInitialized(Size size, TickerProvider vsync) async {
-    final targetWidth = math.max(1, size.width.round());
-    final targetHeight = math.max(1, size.height.round());
-    _size = Size(targetWidth.toDouble(), targetHeight.toDouble());
-
-    if (_initialized) {
-      await _resizePlatformSurface(targetWidth, targetHeight);
-      notifyListeners();
-      return;
-    }
-
-    await ensureRustInitialized();
-    final renderer = rust_api.createRenderer(
-      width: targetWidth,
-      height: targetHeight,
-      sceneType: sceneType,
-    );
-    _handle = renderer.handle;
-    _backendInfo = renderer.backend;
-
-    final surface = await _createPlatformSurface(targetWidth, targetHeight);
-    _textureId = surface.textureId;
-    _ticker = vsync.createTicker(_onTick);
-    _initialized = true;
-    if (autoStart) {
-      await startAnimation();
-    }
+    await _backend.ensureInitialized(size, vsync);
     notifyListeners();
   }
 
   Future<void> disposeRenderer() async {
-    _ticker?.dispose();
-    _ticker = null;
-    final handle = _handle;
-    final initialized = _initialized;
-    _initialized = false;
-    _animating = false;
-    _frameInFlight = false;
-    _textureId = null;
-    _handle = null;
+    await _backend.dispose();
     notifyListeners();
-
-    if (initialized) {
-      await FlutterWgpuPlatformChannel.disposeSurface(surfaceId);
-    }
-    if (handle != null) {
-      rust_api.disposeRenderer(handle: handle);
-    }
   }
 
   Future<void> startAnimation() async {
-    final handle = _handle;
-    if (handle == null) return;
-    rust_api.startAnimation(handle: handle);
-    _animating = true;
-    _ticker?.start();
+    await _backend.startAnimation();
     notifyListeners();
   }
 
   Future<void> stopAnimation() async {
-    final handle = _handle;
-    if (handle == null) return;
-    rust_api.stopAnimation(handle: handle);
-    _animating = false;
-    _ticker?.stop();
+    await _backend.stopAnimation();
     notifyListeners();
   }
 
   Future<void> requestFrame() async {
-    await _pumpFrame();
+    await _backend.requestFrame();
+    notifyListeners();
   }
 
   Future<void> setRotationEnabled(bool enabled) async {
@@ -128,193 +78,29 @@ class FlutterWgpuTextureController extends ChangeNotifier {
     await invokeRustCommand('reset_scene');
   }
 
-  Future<rust_api.BackendInfo?> getBackendInfo() async => _backendInfo;
+  Future<rust_api.BackendInfo?> getBackendInfo() async => _backend.backendInfo;
 
   Future<void> setBoolParam(String key, bool value) async {
-    final handle = _handle;
-    if (handle == null) return;
-    rust_api.setBoolParam(handle: handle, key: key, value: value);
-    await _pumpFrame();
+    await _backend.setBoolParam(key, value);
+    notifyListeners();
   }
 
   Future<void> setFloatParam(String key, double value) async {
-    final handle = _handle;
-    if (handle == null) return;
-    rust_api.setFloatParam(handle: handle, key: key, value: value);
-    await _pumpFrame();
+    await _backend.setFloatParam(key, value);
+    notifyListeners();
   }
 
   Future<void> setVec4Param(String key, List<double> value) async {
-    final handle = _handle;
-    if (handle == null) return;
-    rust_api.setVec4Param(handle: handle, key: key, value: value);
-    await _pumpFrame();
+    await _backend.setVec4Param(key, value);
+    notifyListeners();
   }
 
   Future<void> invokeRustCommand(
     String command, {
     String payload = '{}',
   }) async {
-    final handle = _handle;
-    if (handle == null) return;
-    rust_api.invokeCommand(handle: handle, command: command, payload: payload);
-    await _pumpFrame();
-  }
-
-  // ---------------------------------------------------------------------------
-  // Platform coordination
-  // ---------------------------------------------------------------------------
-
-  Future<NativeSurfaceInfo> _createPlatformSurface(
-    int width,
-    int height,
-  ) async {
-    final handle = _handle!;
-
-    if (Platform.isMacOS || Platform.isIOS) {
-      // Swift allocates the Metal texture using MTLCreateSystemDefaultDevice()
-      // and returns its raw pointer.  Dart then tells Rust to render into it.
-      final surface = await FlutterWgpuPlatformChannel.createSurface(
-        surfaceId: surfaceId,
-        width: width,
-        height: height,
-      );
-      rust_api.attachMetalTexture(
-        handle: handle,
-        mtlTexturePtr: BigInt.from(surface.mtlTexturePtr!),
-        width: width,
-        height: height,
-        bytesPerRow: width * 4, // BGRA8, consistent with the Swift pixel buffer
-      );
-      return surface;
-    }
-
-    if (Platform.isWindows) {
-      final dxgiHandle = rust_api.createDxgiSurface(
-        handle: handle,
-        width: width,
-        height: height,
-      );
-      return FlutterWgpuPlatformChannel.createSurface(
-        surfaceId: surfaceId,
-        width: width,
-        height: height,
-        dxgiHandle: dxgiHandle.toInt(),
-      );
-    }
-
-    if (Platform.isLinux) {
-      rust_api.ensureLinuxPresent(
-          handle: handle, width: width, height: height);
-      final dmabuf = rust_api.exportDmabuf(handle: handle);
-      if (dmabuf == null) throw Exception('DMA-BUF export returned null');
-      return FlutterWgpuPlatformChannel.createSurface(
-        surfaceId: surfaceId,
-        width: width,
-        height: height,
-        fd: dmabuf.fd,
-        stride: dmabuf.stride,
-        offset: dmabuf.offset,
-        fourcc: dmabuf.fourcc,
-        modifierLow: dmabuf.modifierLow,
-        modifierHigh: dmabuf.modifierHigh,
-      );
-    }
-
-    throw UnsupportedError(
-        'flutter_wgpu_texture: unsupported platform ${Platform.operatingSystem}');
-  }
-
-  Future<void> _resizePlatformSurface(int width, int height) async {
-    final handle = _handle!;
-
-    if (Platform.isMacOS || Platform.isIOS) {
-      rust_api.resizeRenderer(handle: handle, width: width, height: height);
-      final surface = await FlutterWgpuPlatformChannel.resizeSurface(
-        surfaceId: surfaceId,
-        width: width,
-        height: height,
-      );
-      if (surface != null && surface.mtlTexturePtr != null) {
-        rust_api.attachMetalTexture(
-          handle: handle,
-          mtlTexturePtr: BigInt.from(surface.mtlTexturePtr!),
-          width: width,
-          height: height,
-          bytesPerRow: width * 4,
-        );
-      }
-      return;
-    }
-
-    if (Platform.isWindows) {
-      final dxgiHandle = rust_api.createDxgiSurface(
-        handle: handle,
-        width: width,
-        height: height,
-      );
-      await FlutterWgpuPlatformChannel.resizeSurface(
-        surfaceId: surfaceId,
-        width: width,
-        height: height,
-        dxgiHandle: dxgiHandle.toInt(),
-      );
-      return;
-    }
-
-    if (Platform.isLinux) {
-      rust_api.ensureLinuxPresent(
-          handle: handle, width: width, height: height);
-      final dmabuf = rust_api.exportDmabuf(handle: handle);
-      if (dmabuf == null) return;
-      await FlutterWgpuPlatformChannel.resizeSurface(
-        surfaceId: surfaceId,
-        width: width,
-        height: height,
-        fd: dmabuf.fd,
-        stride: dmabuf.stride,
-        offset: dmabuf.offset,
-        fourcc: dmabuf.fourcc,
-        modifierLow: dmabuf.modifierLow,
-        modifierHigh: dmabuf.modifierHigh,
-      );
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Frame pump
-  // ---------------------------------------------------------------------------
-
-  void _onTick(Duration _) {
-    if (!_frameInFlight) {
-      unawaited(_pumpFrame());
-    }
-  }
-
-  Future<void> _pumpFrame() async {
-    final handle = _handle;
-    if (handle == null || !_initialized || _frameInFlight) {
-      return;
-    }
-    _frameInFlight = true;
-    try {
-      final rendered = await rust_api.requestFrame(handle: handle);
-      if (rendered && _textureId != null) {
-        await FlutterWgpuPlatformChannel.markFrameAvailable(surfaceId);
-      }
-    } catch (error) {
-      // Surface attachment can lag slightly behind controller startup on desktop.
-      // Treat this as a dropped frame instead of surfacing an unhandled exception.
-      if (!_isTransientPresentTargetError(error)) {
-        rethrow;
-      }
-    } finally {
-      _frameInFlight = false;
-    }
-  }
-
-  bool _isTransientPresentTargetError(Object error) {
-    return error.toString().contains('no present target');
+    await _backend.invokeCommand(command, payload: payload);
+    notifyListeners();
   }
 
   static List<double> _colorToVec4(Color color) {

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'flutter_wgpu_texture_controller.dart';
@@ -60,7 +61,28 @@ class _FlutterWgpuTextureState extends State<FlutterWgpuTexture>
           });
         }
         final textureId = widget.controller.textureId;
-        if (textureId == null) {
+        final viewType = widget.controller.viewType;
+        final unsupportedReason = widget.controller.unsupportedReason;
+        if (unsupportedReason != null) {
+          return SizedBox(
+            width: width,
+            height: height,
+            child: ColoredBox(
+              color: Colors.black12,
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text(
+                    unsupportedReason,
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ),
+            ),
+          );
+        }
+        if ((kIsWeb && !widget.controller.isInitialized) ||
+            (!kIsWeb && textureId == null)) {
           return SizedBox(
             width: width,
             height: height,
@@ -75,7 +97,9 @@ class _FlutterWgpuTextureState extends State<FlutterWgpuTexture>
         return SizedBox(
           width: width,
           height: height,
-          child: Texture(textureId: textureId),
+          child: kIsWeb
+              ? HtmlElementView(viewType: viewType!)
+              : Texture(textureId: textureId!),
         );
       },
     );

@@ -14,6 +14,7 @@ dependencies:
   hooks: ^1.0.2
   native_toolchain_rust: ^1.0.3
   path: ^1.9.1
+  web: ^1.1.1
 
 dev_dependencies:
   ffi: ^2.1.3

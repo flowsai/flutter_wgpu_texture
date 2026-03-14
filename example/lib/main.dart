@@ -45,7 +45,7 @@ class _SpinningCubeAppState extends State<SpinningCubeApp> {
                 ),
                 const SizedBox(height: 8),
                 const Text(
-                  'Desktop-only Flutter texture plugin using Rust + wgpu.',
+                  'Flutter texture plugin using Rust + wgpu, plus WebGPU on web.',
                   style: TextStyle(fontSize: 16, color: Colors.black54),
                 ),
                 const SizedBox(height: 20),

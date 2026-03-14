@@ -23,7 +23,20 @@ jobs:
       - name: Analyze
         run: flutter analyze
 
-      - name: Test
+      - name: Test plugin package
+        run: |
+          if [ -d test ]; then
+            flutter test
+          else
+            echo "No root test/ directory; skipping plugin package tests."
+          fi
+
+      - name: Install example dependencies
+        working-directory: example
+        run: flutter pub get
+
+      - name: Test example app
+        working-directory: example
         run: flutter test
 
       - name: Verify pub package

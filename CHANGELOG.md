@@ -9,6 +9,7 @@
   * Web renders via an `HtmlElementView` platform view (not a Flutter texture).
     `controller.textureId` is `null` on web.
   * Only the `cube` scene is available on web.
+* README and package metadata updated for the 0.2.0 release.
 
 ## 0.1.0
 

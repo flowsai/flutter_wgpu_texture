@@ -5,14 +5,14 @@
 Desktop Flutter texture plugin powered by Rust and [`wgpu`](https://wgpu.rs/).
 Renders GPU content into a native Flutter texture on macOS, Windows, and Linux.
 
-| Platform | Supported |
-|----------|-----------|
-| macOS    | ✓         |
-| Windows  | ✓         |
-| Linux    | ✓         |
-| Android  | ✗         |
-| iOS      | ✗         |
-| Web      | ✗         |
+| Platform | Supported | Backend |
+|----------|-----------|---------|
+| macOS    | ✓         | Metal (via wgpu) |
+| Windows  | ✓         | D3D12 (via wgpu) |
+| Linux    | ✓         | Vulkan (via wgpu) |
+| Web      | ✓         | WebGPU (Chrome 120+), WebGL2 fallback (Firefox, Safari, Brave) |
+| Android  | ✗         | — |
+| iOS      | ✗         | — |
 
 ## Installation
 
@@ -29,6 +29,7 @@ dependencies:
 - macOS: Xcode command line tools
 - Windows: Visual Studio C++ build tools
 - Linux: Vulkan or EGL drivers
+- Web: any modern browser (Chrome 120+ for WebGPU, or any browser with WebGL2 support)
 
 ## Usage
 
@@ -65,7 +66,7 @@ See the [API reference](https://pub.dev/documentation/flutter_wgpu_texture) for 
 ```bash
 cd example          # spinning_cube (canonical pub.dev example)
 flutter pub get
-flutter run -d macos  # or windows / linux
+flutter run -d macos  # or windows / linux / chrome
 ```
 
 ## Custom scenes

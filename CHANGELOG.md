@@ -1,3 +1,15 @@
+## 0.2.0
+
+* **Web support**: the plugin now runs in any modern browser.
+  * Chrome 120+ / Edge 120+: uses WebGPU for GPU-accelerated rendering.
+  * Firefox, Safari, Brave, and any other WebGL2-capable browser: automatically
+    falls back to a WebGL2 renderer. No configuration required.
+  * The active backend is reported in `controller.backendInfo.backend` as
+    `"WebGPU"` or `"WebGL2"`.
+  * Web renders via an `HtmlElementView` platform view (not a Flutter texture).
+    `controller.textureId` is `null` on web.
+  * Only the `cube` scene is available on web.
+
 ## 0.1.0
 
 * Initial release.

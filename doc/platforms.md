@@ -56,12 +56,60 @@ sudo apt install libvulkan-dev libegl-dev libgtk-3-dev \
   clang cmake ninja-build pkg-config
 ```
 
+## Web
+
+**Primary backend:** WebGPU (Chrome 120+, Edge 120+)
+**Fallback backend:** WebGL2 (Firefox, Safari, Brave, any browser without WebGPU)
+**Flutter presentation:** `HtmlElementView` platform view wrapping an `HTMLCanvasElement`
+
+The web implementation is entirely in Dart — no Rust or wgpu involved. At
+initialisation the backend detects `navigator.gpu`:
+
+- If present, it attempts WebGPU (`canvas.getContext('webgpu')`). If the
+  adapter request fails (e.g. Brave's fingerprinting shield), it falls back
+  silently to WebGL2.
+- If absent, WebGL2 is used directly.
+
+The active backend is reported in `controller.backendInfo.backend` as either
+`"WebGPU"` or `"WebGL2"`.
+
+**Architecture:**
+
+```
+FlutterWgpuTextureBackendWeb  (orchestrator)
+  │  detects navigator.gpu, tries renderers in order
+  ├─ WebGpuRenderer  (dart:js_util interop → WebGPU API)
+  └─ WebGlRenderer   (package:web typed bindings → WebGL2 API)
+```
+
+Both renderers implement the same `WebRenderer` interface:
+
+```dart
+abstract class WebRenderer {
+  String get backendName;
+  Future<void> init(HTMLCanvasElement canvas, String sceneType, Size size);
+  void drawFrame(double rotation, List<double> cubeColor, List<double> backgroundColor);
+  void resize(HTMLCanvasElement canvas);
+  void dispose();
+}
+```
+
+**Limitations:**
+- Only the `cube` scene is supported on web (no Rust/wgpu particle or shader scenes)
+- `invokeRustCommand` is a no-op on web (no Rust bridge)
+- `controller.textureId` is `null` on web (canvas-based rendering, not Flutter texture)
+
+**Setup:** No additional toolchain required.
+
+```bash
+flutter run -d chrome
+```
+
 ## Not supported
 
 | Platform | Reason |
 |----------|--------|
 | Android  | `wgpu` Android support and Flutter GPU texture interop not implemented |
 | iOS      | Metal interop path not implemented |
-| Web      | `wgpu` targets WebGPU but Flutter web texture interop not implemented |
 
-PRs welcome for any of the above.
+PRs welcome for either of the above.

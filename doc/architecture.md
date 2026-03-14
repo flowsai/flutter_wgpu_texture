@@ -6,6 +6,8 @@ change one layer without touching the others.
 
 ## Layer overview
 
+### Desktop / native (macOS, Windows, Linux)
+
 ```
 ┌─────────────────────────────────────────┐
 │              Flutter app                │
@@ -37,6 +39,35 @@ change one layer without touching the others.
 │   Linux:   Vulkan (DMA-BUF → EGL → GL) │
 └─────────────────────────────────────────┘
 ```
+
+### Web
+
+On web there is no Rust layer. A pure-Dart backend renders directly to a
+canvas, selecting the best available browser GPU API at runtime:
+
+```
+┌─────────────────────────────────────────┐
+│              Flutter app                │
+│                                         │
+│   FlutterWgpuTexture (widget)           │
+│   FlutterWgpuTextureController          │
+└────────────────┬────────────────────────┘
+                 │  delegates to web-only backend
+                 ▼
+┌─────────────────────────────────────────┐
+│     FlutterWgpuTextureBackendWeb        │
+│                                         │
+│   HtmlElementView (platform view)       │
+│   HTMLCanvasElement                     │
+│   WebRenderer (abstract interface)      │
+│     ├─ WebGpuRenderer  (WebGPU API)     │
+│     └─ WebGlRenderer   (WebGL2 API)     │
+└─────────────────────────────────────────┘
+```
+
+The backend tries `WebGpuRenderer` first; if it fails (adapter unavailable,
+browser blocking) it falls back to `WebGlRenderer`. The widget API and
+controller surface are identical across all platforms.
 
 ## Dart layer
 

@@ -1,24 +1,28 @@
 import 'package:flutter/services.dart';
 
+/// Returned by [FlutterWgpuPlatformChannel.createSurface] and
+/// [FlutterWgpuPlatformChannel.resizeSurface].
 class NativeSurfaceInfo {
   const NativeSurfaceInfo({
     required this.textureId,
-    required this.backend,
-    required this.width,
-    required this.height,
+    this.mtlTexturePtr,
+    this.bytesPerRow,
   });
 
+  /// The Flutter texture id registered with the texture registry.
   final int textureId;
-  final String backend;
-  final int width;
-  final int height;
+
+  /// macOS only: raw `id<MTLTexture>` pointer returned by the Swift bridge.
+  final int? mtlTexturePtr;
+
+  /// macOS only: bytes per row of the Metal texture backing the pixel buffer.
+  final int? bytesPerRow;
 
   factory NativeSurfaceInfo.fromMap(Map<Object?, Object?> map) {
     return NativeSurfaceInfo(
       textureId: map['textureId'] as int,
-      backend: map['backend'] as String,
-      width: map['width'] as int,
-      height: map['height'] as int,
+      mtlTexturePtr: map['mtlTexturePtr'] as int?,
+      bytesPerRow: map['bytesPerRow'] as int?,
     );
   }
 }
@@ -28,33 +32,79 @@ class FlutterWgpuPlatformChannel {
 
   static const MethodChannel channel = MethodChannel('flutter_wgpu_texture');
 
+  /// Create a native surface.
+  ///
+  /// macOS: pass [width] and [height] only — Swift allocates the Metal texture
+  /// and returns [NativeSurfaceInfo.mtlTexturePtr] / [NativeSurfaceInfo.bytesPerRow].
+  ///
+  /// Windows: pass [dxgiHandle] (raw HANDLE from [createDxgiSurface]).
+  ///
+  /// Linux: pass all DMA-BUF fields from the [DmaBufExport] returned by
+  /// [exportDmabuf].
   static Future<NativeSurfaceInfo> createSurface({
     required String surfaceId,
-    required int handle,
     required int width,
     required int height,
+    // Windows
+    int? dxgiHandle,
+    // Linux
+    int? fd,
+    int? stride,
+    int? offset,
+    int? fourcc,
+    int? modifierLow,
+    int? modifierHigh,
   }) async {
-    final result = await channel.invokeMethod<Object?>('createSurface', {
+    final args = <String, Object>{
       'surfaceId': surfaceId,
-      'handle': handle.toString(),
       'width': width,
       'height': height,
-    });
-    return NativeSurfaceInfo.fromMap((result as Map<Object?, Object?>));
+      if (dxgiHandle != null) 'dxgiHandle': dxgiHandle,
+      if (fd != null) 'fd': fd,
+      if (stride != null) 'stride': stride,
+      if (offset != null) 'offset': offset,
+      if (fourcc != null) 'fourcc': fourcc,
+      if (modifierLow != null) 'modifierLow': modifierLow,
+      if (modifierHigh != null) 'modifierHigh': modifierHigh,
+    };
+    final result = await channel.invokeMethod<Object?>('createSurface', args);
+    return NativeSurfaceInfo.fromMap(result as Map<Object?, Object?>);
   }
 
-  static Future<void> resizeSurface({
+  /// Resize an existing surface.
+  ///
+  /// On macOS, returns a new [NativeSurfaceInfo] with an updated
+  /// [NativeSurfaceInfo.mtlTexturePtr] / [NativeSurfaceInfo.bytesPerRow].
+  /// On other platforms returns `null`.
+  static Future<NativeSurfaceInfo?> resizeSurface({
     required String surfaceId,
-    required int handle,
     required int width,
     required int height,
+    // Windows
+    int? dxgiHandle,
+    // Linux
+    int? fd,
+    int? stride,
+    int? offset,
+    int? fourcc,
+    int? modifierLow,
+    int? modifierHigh,
   }) async {
-    await channel.invokeMethod<void>('resizeSurface', {
+    final args = <String, Object>{
       'surfaceId': surfaceId,
-      'handle': handle.toString(),
       'width': width,
       'height': height,
-    });
+      if (dxgiHandle != null) 'dxgiHandle': dxgiHandle,
+      if (fd != null) 'fd': fd,
+      if (stride != null) 'stride': stride,
+      if (offset != null) 'offset': offset,
+      if (fourcc != null) 'fourcc': fourcc,
+      if (modifierLow != null) 'modifierLow': modifierLow,
+      if (modifierHigh != null) 'modifierHigh': modifierHigh,
+    };
+    final result = await channel.invokeMethod<Object?>('resizeSurface', args);
+    if (result == null) return null;
+    return NativeSurfaceInfo.fromMap(result as Map<Object?, Object?>);
   }
 
   static Future<void> disposeSurface(String surfaceId) {

@@ -4,9 +4,11 @@
 
 **wgpu backend:** Metal
 **Flutter presentation:** `FlutterTexture` (pixel buffer path)
-**Interop:** Rust renders into a `CVMetalTexture`; the macOS plugin registers
-this texture with the Flutter engine as a `FlutterTexture` and calls
-`markTextureFrameAvailable` after each render.
+**Interop:** Dart calls FRB to create the Rust renderer, then calls the Swift
+bridge via method channel to allocate a `CVPixelBuffer` + `CVMetalTexture`.
+Swift returns the raw `id<MTLTexture>` pointer back to Dart, which passes it
+to Rust via FRB (`attachMetalTexture`). Rust renders directly into the Metal
+texture; the Swift bridge signals frame availability to Flutter.
 
 **Setup:**
 
@@ -17,9 +19,10 @@ this texture with the Flutter engine as a `FlutterTexture` and calls
 
 **wgpu backend:** D3D12
 **Flutter presentation:** external GPU surface texture
-**Interop:** Rust creates a D3D12 texture and exports it as a DXGI shared
-handle. The Windows plugin imports the handle and registers it with the
-Flutter engine as a GPU surface texture.
+**Interop:** Dart calls FRB (`createDxgiSurface`) to have Rust create a D3D12
+texture and export it as a DXGI shared handle. Dart forwards the handle to the
+C++ bridge via method channel. The bridge imports the handle and registers it
+with the Flutter engine as a GPU surface texture.
 
 **Setup:**
 
@@ -30,11 +33,13 @@ Flutter engine as a GPU surface texture.
 
 **wgpu backend:** Vulkan
 **Flutter presentation:** `FlTextureGL`
-**Interop:** Rust renders into a Vulkan image, exports it as a DMA-BUF file
-descriptor, imports that into EGL as an external image, and exposes the
-resulting OpenGL texture id to the Flutter engine via `FlTextureGL`.
+**Interop:** Dart calls FRB (`ensureLinuxPresent`, `exportDmabuf`) to have
+Rust create a Vulkan image and export it as a DMA-BUF file descriptor. Dart
+forwards the fd and metadata to the C++ bridge via method channel. The bridge
+imports it into EGL as an external image and exposes the resulting OpenGL
+texture to the Flutter engine via `FlTextureGL`.
 
-This path deliberately avoids CPU readback — the pixel data stays on the GPU
+This path deliberately avoids CPU readback — pixel data stays on the GPU
 throughout.
 
 **Setup:**

@@ -69,9 +69,9 @@ flutter run -d macos  # or windows / linux
 
 ## Architecture
 
-Built on `flutter_rust_bridge` and `cargokit`. The Dart widget communicates with
-a Rust/wgpu renderer via FFI; the renderer writes directly to a Flutter
-`FlutterDesktopPixelBuffer` / Metal / D3D12 surface.
+Built on `flutter_rust_bridge` and `native_toolchain_rust`. The Dart controller
+coordinates a Rust/wgpu renderer via FRB FFI; the renderer writes directly into
+a shared Metal / D3D12 / DMA-BUF surface that Flutter composites as a texture.
 
 - [docs/architecture.md](./docs/architecture.md)
 - [docs/extending_rust_logic.md](./docs/extending_rust_logic.md)

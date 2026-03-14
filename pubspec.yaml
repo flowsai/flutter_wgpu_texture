@@ -4,13 +4,15 @@ version: 0.0.1
 homepage: https://github.com/flowsai/flutter_wgpu_texture
 
 environment:
-  sdk: ^3.8.0
-  flutter: '>=3.35.0'
+  sdk: ^3.9.0
+  flutter: '>=3.38.0'
 
 dependencies:
   flutter:
     sdk: flutter
   flutter_rust_bridge: 2.11.1
+  hooks: ^1.0.2
+  native_toolchain_rust: ^1.0.3
   path: ^1.9.1
 
 dev_dependencies:
@@ -43,14 +45,11 @@ flutter:
     platforms:
       linux:
         pluginClass: FlutterWgpuTexturePlugin
-        ffiPlugin: true
       macos:
         pluginClass: FlutterWgpuTexturePlugin
-        ffiPlugin: true
       windows:
         pluginClass: FlutterWgpuTexturePlugin
         fileName: flutter_wgpu_texture_plugin.cpp
-        ffiPlugin: true
 
   # To add assets to your plugin package, add an assets section, like this:
   # assets:

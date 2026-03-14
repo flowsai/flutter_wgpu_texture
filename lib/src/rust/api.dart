@@ -6,7 +6,7 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`
 
 RendererInfo createRenderer({
   required int width,
@@ -73,6 +73,72 @@ void invokeCommand({
 BackendInfo getBackendInfo({required BigInt handle}) =>
     RustLib.instance.api.crateApiGetBackendInfo(handle: handle);
 
+void resizeRenderer({
+  required BigInt handle,
+  required int width,
+  required int height,
+}) => RustLib.instance.api.crateApiResizeRenderer(
+  handle: handle,
+  width: width,
+  height: height,
+);
+
+/// Attach a Metal texture to the renderer (macOS / iOS only).
+///
+/// `mtl_texture_ptr` is the raw pointer value of an `id<MTLTexture>` cast to
+/// `usize`. The native Swift bridge creates the texture and passes its address
+/// back to Dart, which forwards it here so Rust can render into it.
+void attachMetalTexture({
+  required BigInt handle,
+  required BigInt mtlTexturePtr,
+  required int width,
+  required int height,
+  required int bytesPerRow,
+}) => RustLib.instance.api.crateApiAttachMetalTexture(
+  handle: handle,
+  mtlTexturePtr: mtlTexturePtr,
+  width: width,
+  height: height,
+  bytesPerRow: bytesPerRow,
+);
+
+/// Create a DXGI shared-handle present surface (Windows only).
+///
+/// Returns the raw HANDLE value cast to `usize`. The native Windows bridge
+/// receives this value via the method channel and passes it to the Flutter
+/// GPU surface texture system.
+BigInt createDxgiSurface({
+  required BigInt handle,
+  required int width,
+  required int height,
+}) => RustLib.instance.api.crateApiCreateDxgiSurface(
+  handle: handle,
+  width: width,
+  height: height,
+);
+
+/// Ensure the Linux Vulkan DMA-BUF present target exists and is the right size.
+void ensureLinuxPresent({
+  required BigInt handle,
+  required int width,
+  required int height,
+}) => RustLib.instance.api.crateApiEnsureLinuxPresent(
+  handle: handle,
+  width: width,
+  height: height,
+);
+
+/// Export the current frame as a DMA-BUF file descriptor (Linux only).
+///
+/// The native Linux bridge receives these values via the method channel and
+/// uses them to import the buffer into an EGL image / GL texture.
+DmaBufExport? exportDmabuf({required BigInt handle}) =>
+    RustLib.instance.api.crateApiExportDmabuf(handle: handle);
+
+/// Returns `true` if DMA-BUF export is supported by the current Vulkan device.
+bool linuxDmabufSupported({required BigInt handle}) =>
+    RustLib.instance.api.crateApiLinuxDmabufSupported(handle: handle);
+
 class BackendInfo {
   final String backend;
   final String deviceName;
@@ -95,6 +161,53 @@ class BackendInfo {
           backend == other.backend &&
           deviceName == other.deviceName &&
           driver == other.driver;
+}
+
+class DmaBufExport {
+  final int fd;
+  final int width;
+  final int height;
+  final int stride;
+  final int offset;
+  final int fourcc;
+  final int modifierLow;
+  final int modifierHigh;
+
+  const DmaBufExport({
+    required this.fd,
+    required this.width,
+    required this.height,
+    required this.stride,
+    required this.offset,
+    required this.fourcc,
+    required this.modifierLow,
+    required this.modifierHigh,
+  });
+
+  @override
+  int get hashCode =>
+      fd.hashCode ^
+      width.hashCode ^
+      height.hashCode ^
+      stride.hashCode ^
+      offset.hashCode ^
+      fourcc.hashCode ^
+      modifierLow.hashCode ^
+      modifierHigh.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DmaBufExport &&
+          runtimeType == other.runtimeType &&
+          fd == other.fd &&
+          width == other.width &&
+          height == other.height &&
+          stride == other.stride &&
+          offset == other.offset &&
+          fourcc == other.fourcc &&
+          modifierLow == other.modifierLow &&
+          modifierHigh == other.modifierHigh;
 }
 
 class RendererInfo {

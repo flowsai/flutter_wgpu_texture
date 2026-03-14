@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -39,13 +40,9 @@ class FlutterWgpuTextureController extends ChangeNotifier {
     final targetWidth = math.max(1, size.width.round());
     final targetHeight = math.max(1, size.height.round());
     _size = Size(targetWidth.toDouble(), targetHeight.toDouble());
+
     if (_initialized) {
-      await FlutterWgpuPlatformChannel.resizeSurface(
-        surfaceId: surfaceId,
-        handle: _handle!.toInt(),
-        width: targetWidth,
-        height: targetHeight,
-      );
+      await _resizePlatformSurface(targetWidth, targetHeight);
       notifyListeners();
       return;
     }
@@ -58,12 +55,8 @@ class FlutterWgpuTextureController extends ChangeNotifier {
     );
     _handle = renderer.handle;
     _backendInfo = renderer.backend;
-    final surface = await FlutterWgpuPlatformChannel.createSurface(
-      surfaceId: surfaceId,
-      handle: renderer.handle.toInt(),
-      width: targetWidth,
-      height: targetHeight,
-    );
+
+    final surface = await _createPlatformSurface(targetWidth, targetHeight);
     _textureId = surface.textureId;
     _ticker = vsync.createTicker(_onTick);
     _initialized = true;
@@ -167,6 +160,130 @@ class FlutterWgpuTextureController extends ChangeNotifier {
     rust_api.invokeCommand(handle: handle, command: command, payload: payload);
     await _pumpFrame();
   }
+
+  // ---------------------------------------------------------------------------
+  // Platform coordination
+  // ---------------------------------------------------------------------------
+
+  Future<NativeSurfaceInfo> _createPlatformSurface(
+    int width,
+    int height,
+  ) async {
+    final handle = _handle!;
+
+    if (Platform.isMacOS || Platform.isIOS) {
+      // Swift allocates the Metal texture using MTLCreateSystemDefaultDevice()
+      // and returns its raw pointer.  Dart then tells Rust to render into it.
+      final surface = await FlutterWgpuPlatformChannel.createSurface(
+        surfaceId: surfaceId,
+        width: width,
+        height: height,
+      );
+      rust_api.attachMetalTexture(
+        handle: handle,
+        mtlTexturePtr: BigInt.from(surface.mtlTexturePtr!),
+        width: width,
+        height: height,
+        bytesPerRow: width * 4, // BGRA8, consistent with the Swift pixel buffer
+      );
+      return surface;
+    }
+
+    if (Platform.isWindows) {
+      final dxgiHandle = rust_api.createDxgiSurface(
+        handle: handle,
+        width: width,
+        height: height,
+      );
+      return FlutterWgpuPlatformChannel.createSurface(
+        surfaceId: surfaceId,
+        width: width,
+        height: height,
+        dxgiHandle: dxgiHandle.toInt(),
+      );
+    }
+
+    if (Platform.isLinux) {
+      rust_api.ensureLinuxPresent(
+          handle: handle, width: width, height: height);
+      final dmabuf = rust_api.exportDmabuf(handle: handle);
+      if (dmabuf == null) throw Exception('DMA-BUF export returned null');
+      return FlutterWgpuPlatformChannel.createSurface(
+        surfaceId: surfaceId,
+        width: width,
+        height: height,
+        fd: dmabuf.fd,
+        stride: dmabuf.stride,
+        offset: dmabuf.offset,
+        fourcc: dmabuf.fourcc,
+        modifierLow: dmabuf.modifierLow,
+        modifierHigh: dmabuf.modifierHigh,
+      );
+    }
+
+    throw UnsupportedError(
+        'flutter_wgpu_texture: unsupported platform ${Platform.operatingSystem}');
+  }
+
+  Future<void> _resizePlatformSurface(int width, int height) async {
+    final handle = _handle!;
+
+    if (Platform.isMacOS || Platform.isIOS) {
+      rust_api.resizeRenderer(handle: handle, width: width, height: height);
+      final surface = await FlutterWgpuPlatformChannel.resizeSurface(
+        surfaceId: surfaceId,
+        width: width,
+        height: height,
+      );
+      if (surface != null && surface.mtlTexturePtr != null) {
+        rust_api.attachMetalTexture(
+          handle: handle,
+          mtlTexturePtr: BigInt.from(surface.mtlTexturePtr!),
+          width: width,
+          height: height,
+          bytesPerRow: width * 4,
+        );
+      }
+      return;
+    }
+
+    if (Platform.isWindows) {
+      final dxgiHandle = rust_api.createDxgiSurface(
+        handle: handle,
+        width: width,
+        height: height,
+      );
+      await FlutterWgpuPlatformChannel.resizeSurface(
+        surfaceId: surfaceId,
+        width: width,
+        height: height,
+        dxgiHandle: dxgiHandle.toInt(),
+      );
+      return;
+    }
+
+    if (Platform.isLinux) {
+      rust_api.ensureLinuxPresent(
+          handle: handle, width: width, height: height);
+      final dmabuf = rust_api.exportDmabuf(handle: handle);
+      if (dmabuf == null) return;
+      await FlutterWgpuPlatformChannel.resizeSurface(
+        surfaceId: surfaceId,
+        width: width,
+        height: height,
+        fd: dmabuf.fd,
+        stride: dmabuf.stride,
+        offset: dmabuf.offset,
+        fourcc: dmabuf.fourcc,
+        modifierLow: dmabuf.modifierLow,
+        modifierHigh: dmabuf.modifierHigh,
+      );
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Frame pump
+  // ---------------------------------------------------------------------------
 
   void _onTick(Duration _) {
     if (!_frameInFlight) {

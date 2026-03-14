@@ -4,17 +4,19 @@ mod frb_generated;
 #[cfg(target_os = "linux")]
 mod linux_dma_buf;
 mod present;
+pub mod scene;
+mod scenes;
 
 use std::ffi::c_void;
 
 #[no_mangle]
 pub extern "C" fn engine_create(width: u32, height: u32, scene_type: u8) -> u64 {
-    let scene = match scene_type {
-        1 => engine::SceneType::Cube,
-        2 => engine::SceneType::Particles,
-        _ => engine::SceneType::Cube,
+    let scene_name = match scene_type {
+        2 => "particles",
+        3 => "shader_playground",
+        _ => "cube",
     };
-    engine::engine_create(width, height, scene).unwrap_or(0)
+    engine::engine_create(width, height, scene_name).unwrap_or(0)
 }
 
 #[no_mangle]

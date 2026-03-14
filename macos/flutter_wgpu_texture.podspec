@@ -20,20 +20,11 @@ Desktop Flutter texture plugin backed by Rust wgpu.
   s.platform = :osx, '10.14'
   s.swift_version = '5.0'
 
-  s.script_phase = {
-    :name => 'Build Rust library',
-    # First argument is relative path to the `rust` folder, second is name of rust library
-    :script => 'sh "$PODS_TARGET_SRCROOT/../cargokit/build_pod.sh" ../rust flutter_wgpu_texture',
-    :execution_position => :before_compile,
-    :input_files => ['${BUILT_PRODUCTS_DIR}/cargokit_phony'],
-    # Let XCode know that the static library referenced in -force_load below is
-    # created by this build step.
-    :output_files => ["${BUILT_PRODUCTS_DIR}/libflutter_wgpu_texture.a"],
-  }
+  # Rust is compiled by the build hook (hook/build.dart) using native_toolchain_rust
+  # and loaded at runtime by flutter_rust_bridge.  No static linking needed here.
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
     # Flutter.framework does not contain a i386 slice.
     'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386',
-    'OTHER_LDFLAGS' => '-force_load ${BUILT_PRODUCTS_DIR}/libflutter_wgpu_texture.a',
   }
 end

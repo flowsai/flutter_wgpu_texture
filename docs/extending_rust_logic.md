@@ -14,17 +14,18 @@ await controller.setVec4Param('key', [r, g, b, a]);
 await controller.invokeRustCommand('command', payload: '{"value":1}');
 ```
 
-If the Rust renderer already handles the key or command, no new Dart code is
+If the Rust scene already handles the key or command, no new Dart code is
 needed.
 
 ## Add a parameter to an existing scene
 
-1. Add the field to the scene state struct in `rust/src/engine.rs`.
-2. Route the incoming value in the appropriate `Renderer` setter:
-   - `Renderer::set_float_param`
-   - `Renderer::set_bool_param`
-   - `Renderer::set_vec4_param`
-3. Use the field in the scene's render function.
+1. Add the field to the scene struct in the relevant file under
+   `rust/src/scenes/` (e.g. `rust/src/scenes/cube.rs`).
+2. Route the incoming key in the scene's `Scene` trait implementation:
+   - `fn set_float_param(&mut self, key: &str, value: f32)`
+   - `fn set_bool_param(&mut self, key: &str, value: bool)`
+   - `fn set_vec4_param(&mut self, key: &str, value: [f32; 4])`
+3. Use the field in the scene's `render` function.
 
 Call it from Dart immediately — no binding regeneration required:
 
@@ -34,8 +35,9 @@ await controller.setFloatParam('your_new_param', 0.5);
 
 ## Add a new command
 
-1. Add a branch in `Renderer::invoke_command` in `rust/src/engine.rs`.
-2. Update the appropriate scene state.
+1. Add a branch in the scene's `invoke_command` implementation in
+   `rust/src/scenes/<your_scene>.rs`.
+2. Update the scene state.
 3. Call it from Dart:
 
 ```dart
@@ -44,18 +46,42 @@ await controller.invokeRustCommand('your_command', payload: '{"value":1}');
 
 ## Add a new built-in scene
 
-1. Add a variant to `SceneType` in `rust/src/engine.rs`.
-2. Add the scene state struct and a constructor.
-3. Instantiate it in `Renderer::new` based on the incoming scene type string.
-4. Add the scene render function and dispatch to it from `Renderer::render`.
-5. Route scene-specific params in `set_float_param` / `set_vec4_param` etc.
-6. Map the public `sceneType` string to the new enum variant in
-   `rust/src/api/mod.rs`.
+1. Create `rust/src/scenes/my_scene.rs` implementing the `Scene` trait:
 
-Then use it from Dart:
+```rust
+use crate::scene::{Scene, SceneRenderArgs};
+
+pub struct MyScene { /* state */ }
+
+impl MyScene {
+    pub fn new(device: &wgpu::Device) -> Result<Self, String> { /* ... */ }
+}
+
+impl Scene for MyScene {
+    fn render(&mut self, args: &SceneRenderArgs, encoder: &mut wgpu::CommandEncoder)
+        -> Result<(), String> { /* ... */ }
+
+    fn set_float_param(&mut self, key: &str, value: f32) { /* ... */ }
+}
+```
+
+2. Expose it from `rust/src/scenes/mod.rs`:
+
+```rust
+mod my_scene;
+pub use my_scene::MyScene;
+```
+
+3. Add a branch in `scene_for_type`:
+
+```rust
+"my_scene" => Ok(Box::new(MyScene::new(device)?)),
+```
+
+4. Use it from Dart:
 
 ```dart
-final controller = FlutterWgpuTextureController(sceneType: 'your_scene');
+final controller = FlutterWgpuTextureController(sceneType: 'my_scene');
 ```
 
 ## Add a typed Dart convenience method

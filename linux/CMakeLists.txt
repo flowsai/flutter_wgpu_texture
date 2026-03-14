@@ -32,11 +32,9 @@ target_link_libraries(${PLUGIN_NAME} PRIVATE PkgConfig::GTK)
 target_link_libraries(${PLUGIN_NAME} PRIVATE OpenGL::GL)
 target_link_libraries(${PLUGIN_NAME} PRIVATE ${EGL_LIBRARIES})
 
-include("../cargokit/cmake/cargokit.cmake")
-apply_cargokit(${PLUGIN_NAME} ../rust flutter_wgpu_texture "engine_create")
-
-# List of absolute paths to libraries that should be bundled with the plugin.
+# Rust is compiled by the build hook (hook/build.dart) using native_toolchain_rust
+# and loaded at runtime by flutter_rust_bridge.  No Rust libraries to bundle here.
 set(flutter_wgpu_texture_bundled_libraries
-  "${${PLUGIN_NAME}_cargokit_lib}"
+  ""
   PARENT_SCOPE
 )

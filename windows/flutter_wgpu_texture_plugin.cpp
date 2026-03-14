@@ -17,13 +17,9 @@
 #include <string>
 #include <unordered_map>
 
-extern "C" {
-void* engine_create_present_dxgi_surface(uint64_t handle,
-                                         uint32_t width,
-                                         uint32_t height);
-uint8_t engine_resize(uint64_t handle, uint32_t width, uint32_t height);
-uint8_t engine_get_backend(uint64_t handle);
-}
+// No extern "C" Rust declarations — Rust is compiled as a separate dylib
+// loaded by flutter_rust_bridge.  All Rust operations happen in Dart via FRB;
+// this file only handles Flutter GPU-surface texture registration.
 
 namespace {
 
@@ -79,25 +75,18 @@ std::string GetSurfaceId(const flutter::EncodableMap& args) {
   return "default";
 }
 
-uint64_t GetHandle(const flutter::EncodableMap& args) {
-  const auto it = args.find(flutter::EncodableValue("handle"));
+// Returns the raw DXGI shared HANDLE sent from Dart (already created by the
+// Rust engine via create_dxgi_surface FRB call).
+void* GetDxgiHandle(const flutter::EncodableMap& args) {
+  const auto it = args.find(flutter::EncodableValue("dxgiHandle"));
   if (it == args.end()) {
-    return 0;
+    return nullptr;
   }
-  return static_cast<uint64_t>(GetIntValue(it->second).value_or(0));
-}
-
-const char* BackendName(uint8_t backend) {
-  switch (backend) {
-    case 1:
-      return "metal";
-    case 2:
-      return "dx12";
-    case 3:
-      return "vulkan";
-    default:
-      return "unknown";
+  const auto value = GetIntValue(it->second);
+  if (!value.has_value()) {
+    return nullptr;
   }
+  return reinterpret_cast<void*>(static_cast<uintptr_t>(*value));
 }
 
 struct GpuSurfaceBinding {
@@ -154,7 +143,6 @@ void ReleaseBinding(void* user_data) {
 
 struct SurfaceState {
   std::string surface_id;
-  uint64_t handle = 0;
   int width = 1;
   int height = 1;
   int64_t texture_id = -1;
@@ -294,30 +282,21 @@ void FlutterWgpuTexturePlugin::HandleCreateSurface(
     const flutter::EncodableMap& args,
     std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
   const auto surface_id = GetSurfaceId(args);
-  const auto handle = GetHandle(args);
+  void* shared_handle = GetDxgiHandle(args);
   const auto width = GetClampedInt(args, "width", 512, 1, 16384);
   const auto height = GetClampedInt(args, "height", 512, 1, 16384);
-  if (handle == 0) {
-    result->Error("invalid_handle", "Renderer handle is required");
+
+  if (!shared_handle) {
+    result->Error("invalid_dxgi_handle", "dxgiHandle is required");
     return;
   }
 
   auto surface = GetOrCreateSurface(surface_id);
   std::lock_guard<std::mutex> lock(surface->mutex);
-  surface->handle = handle;
   surface->width = width;
   surface->height = height;
 
   if (surface->binding == nullptr) {
-    void* shared_handle = engine_create_present_dxgi_surface(
-        handle, static_cast<uint32_t>(width), static_cast<uint32_t>(height));
-    if (!shared_handle) {
-      result->Error(
-          "create_present_failed",
-          "engine_create_present_dxgi_surface returned null");
-      return;
-    }
-
     auto binding = std::make_shared<GpuSurfaceBinding>(
         shared_handle, static_cast<size_t>(width), static_cast<size_t>(height));
     FlutterDesktopTextureInfo texture_info{};
@@ -346,8 +325,6 @@ void FlutterWgpuTexturePlugin::HandleCreateSurface(
   flutter::EncodableMap response;
   response[flutter::EncodableValue("textureId")] =
       flutter::EncodableValue(surface->texture_id);
-  response[flutter::EncodableValue("backend")] =
-      flutter::EncodableValue(std::string(BackendName(engine_get_backend(handle))));
   response[flutter::EncodableValue("width")] = flutter::EncodableValue(width);
   response[flutter::EncodableValue("height")] = flutter::EncodableValue(height);
   result->Success(flutter::EncodableValue(response));
@@ -357,9 +334,10 @@ void FlutterWgpuTexturePlugin::HandleResizeSurface(
     const flutter::EncodableMap& args,
     std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
   const auto surface_id = GetSurfaceId(args);
-  const auto handle = GetHandle(args);
+  void* shared_handle = GetDxgiHandle(args);
   const auto width = GetClampedInt(args, "width", 512, 1, 16384);
   const auto height = GetClampedInt(args, "height", 512, 1, 16384);
+
   auto surface = FindSurface(surface_id);
   if (!surface) {
     result->Success();
@@ -367,23 +345,10 @@ void FlutterWgpuTexturePlugin::HandleResizeSurface(
   }
 
   std::lock_guard<std::mutex> lock(surface->mutex);
-  if (engine_resize(handle, static_cast<uint32_t>(width), static_cast<uint32_t>(height)) == 0) {
-    result->Error("resize_failed", "engine_resize returned 0");
-    return;
-  }
-  void* shared_handle = engine_create_present_dxgi_surface(
-      handle, static_cast<uint32_t>(width), static_cast<uint32_t>(height));
-  if (!shared_handle) {
-    result->Error(
-        "create_present_failed",
-        "engine_create_present_dxgi_surface returned null");
-    return;
-  }
-  if (surface->binding) {
+  if (shared_handle && surface->binding) {
     surface->binding->Update(
         shared_handle, static_cast<size_t>(width), static_cast<size_t>(height));
   }
-  surface->handle = handle;
   surface->width = width;
   surface->height = height;
   result->Success();

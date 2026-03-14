@@ -16,25 +16,10 @@
 #include <unistd.h>
 #include <vector>
 
-extern "C" {
-uint8_t engine_get_backend(uint64_t handle);
-uint8_t engine_resize(uint64_t handle, uint32_t width, uint32_t height);
-uint8_t engine_ensure_linux_present(uint64_t handle, uint32_t width, uint32_t height);
-uint8_t engine_dmabuf_supported(uint64_t handle);
-
-struct FfiDmaBufInfo {
-  int32_t fd;
-  uint32_t width;
-  uint32_t height;
-  int32_t stride;
-  int32_t offset;
-  int32_t fourcc;
-  uint32_t modifier_low;
-  uint32_t modifier_high;
-};
-
-uint8_t engine_export_dmabuf(uint64_t handle, FfiDmaBufInfo* out_info);
-}
+// No extern "C" Rust declarations — Rust is compiled as a separate dylib
+// loaded by flutter_rust_bridge.  All Rust operations happen in Dart via FRB;
+// DMA-BUF file descriptor and metadata are forwarded here via the method
+// channel so this file can create the EGL image / GL texture.
 
 namespace {
 
@@ -47,9 +32,19 @@ static PFNEGLCREATEIMAGEKHRPROC g_egl_create_image_khr = nullptr;
 static PFNEGLDESTROYIMAGEKHRPROC g_egl_destroy_image_khr = nullptr;
 static PFNGLEGLIMAGETARGETTEXTURE2DOESPROC g_gl_egl_image_target_texture_2d_oes = nullptr;
 
+struct DmaBufParams {
+  int32_t fd = -1;
+  uint32_t width = 0;
+  uint32_t height = 0;
+  int32_t stride = 0;
+  int32_t offset = 0;
+  int32_t fourcc = 0;
+  uint32_t modifier_low = 0;
+  uint32_t modifier_high = 0;
+};
+
 struct SurfaceState {
   std::string surface_id;
-  uint64_t engine_handle = 0;
   int64_t texture_id = -1;
   FlTexture* texture = nullptr;
   GLuint gl_texture_name = 0;
@@ -117,17 +112,23 @@ int GetClampedInt(FlValue* args,
   return std::clamp(static_cast<int>(GetIntValue(value, fallback)), min_value, max_value);
 }
 
-const char* BackendName(uint8_t backend) {
-  switch (backend) {
-    case 1:
-      return "metal";
-    case 2:
-      return "dx12";
-    case 3:
-      return "vulkan";
-    default:
-      return "unknown";
-  }
+DmaBufParams GetDmaBufParams(FlValue* args) {
+  DmaBufParams p;
+  p.fd = static_cast<int32_t>(GetIntValue(
+      args ? fl_value_lookup_string(args, "fd") : nullptr, -1));
+  p.width = static_cast<uint32_t>(GetClampedInt(args, "width", 1, 1, 65535));
+  p.height = static_cast<uint32_t>(GetClampedInt(args, "height", 1, 1, 65535));
+  p.stride = static_cast<int32_t>(GetIntValue(
+      args ? fl_value_lookup_string(args, "stride") : nullptr, 0));
+  p.offset = static_cast<int32_t>(GetIntValue(
+      args ? fl_value_lookup_string(args, "offset") : nullptr, 0));
+  p.fourcc = static_cast<int32_t>(GetIntValue(
+      args ? fl_value_lookup_string(args, "fourcc") : nullptr, 0));
+  p.modifier_low = static_cast<uint32_t>(GetIntValue(
+      args ? fl_value_lookup_string(args, "modifierLow") : nullptr, 0));
+  p.modifier_high = static_cast<uint32_t>(GetIntValue(
+      args ? fl_value_lookup_string(args, "modifierHigh") : nullptr, 0));
+  return p;
 }
 
 void detect_dmabuf_import_support(EGLDisplay egl_display) {
@@ -161,28 +162,28 @@ void detect_dmabuf_import_support(EGLDisplay egl_display) {
   g_dmabuf_import_supported = 1;
 }
 
-GLuint import_dmabuf_to_gl_texture(const FfiDmaBufInfo& info) {
-  if (info.fd < 0) {
+GLuint import_dmabuf_to_gl_texture(const DmaBufParams& p) {
+  if (p.fd < 0) {
     return 0;
   }
   std::vector<EGLint> attribs;
   attribs.push_back(EGL_LINUX_DRM_FOURCC_EXT);
-  attribs.push_back(info.fourcc);
+  attribs.push_back(p.fourcc);
   attribs.push_back(EGL_WIDTH);
-  attribs.push_back(static_cast<EGLint>(info.width));
+  attribs.push_back(static_cast<EGLint>(p.width));
   attribs.push_back(EGL_HEIGHT);
-  attribs.push_back(static_cast<EGLint>(info.height));
+  attribs.push_back(static_cast<EGLint>(p.height));
   attribs.push_back(EGL_DMA_BUF_PLANE0_FD_EXT);
-  attribs.push_back(info.fd);
+  attribs.push_back(p.fd);
   attribs.push_back(EGL_DMA_BUF_PLANE0_OFFSET_EXT);
-  attribs.push_back(info.offset);
+  attribs.push_back(p.offset);
   attribs.push_back(EGL_DMA_BUF_PLANE0_PITCH_EXT);
-  attribs.push_back(info.stride);
-  if (info.modifier_low != 0 || info.modifier_high != 0) {
+  attribs.push_back(p.stride);
+  if (p.modifier_low != 0 || p.modifier_high != 0) {
     attribs.push_back(EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT);
-    attribs.push_back(static_cast<EGLint>(info.modifier_low));
+    attribs.push_back(static_cast<EGLint>(p.modifier_low));
     attribs.push_back(EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT);
-    attribs.push_back(static_cast<EGLint>(info.modifier_high));
+    attribs.push_back(static_cast<EGLint>(p.modifier_high));
   }
   attribs.push_back(EGL_NONE);
 
@@ -270,33 +271,16 @@ gboolean flutter_wgpu_linux_texture_populate(FlTextureGL* texture,
     detect_dmabuf_import_support(eglGetCurrentDisplay());
   }
   if (g_dmabuf_import_supported != 1) {
-    g_warning("DMA-BUF populate failed: import support unavailable");
-    return FALSE;
-  }
-  if (engine_dmabuf_supported(surface->engine_handle) == 0) {
-    g_warning("DMA-BUF populate failed: Rust export unsupported");
+    g_warning("DMA-BUF populate failed: EGL import support unavailable");
     return FALSE;
   }
 
-  const bool needs_import = surface->gl_texture_name == 0 ||
-                            surface->imported_width != pixel_width ||
-                            surface->imported_height != pixel_height;
-  if (needs_import) {
-    release_surface_texture(surface);
-    FfiDmaBufInfo info = {};
-    if (engine_export_dmabuf(surface->engine_handle, &info) == 0) {
-      g_warning("DMA-BUF populate failed: export returned no image");
-      return FALSE;
-    }
-    GLuint imported_texture = import_dmabuf_to_gl_texture(info);
-    close(info.fd);
-    if (imported_texture == 0) {
-      g_warning("DMA-BUF populate failed: GL import returned texture 0");
-      return FALSE;
-    }
-    surface->gl_texture_name = imported_texture;
-    surface->imported_width = pixel_width;
-    surface->imported_height = pixel_height;
+  // The GL texture is re-imported whenever the surface size changes.
+  // The Dart layer (via FRB + method channel) always calls resizeSurface before
+  // the next frame when dimensions change, which clears gl_texture_name.
+  if (surface->gl_texture_name == 0) {
+    g_warning("DMA-BUF populate: no GL texture yet (waiting for DMA-BUF import)");
+    return FALSE;
   }
 
   *target = GL_TEXTURE_2D;
@@ -353,18 +337,25 @@ static FlMethodResponse* handle_create_surface(FlutterWgpuTexturePlugin* self, F
     return make_error_response("unavailable", "Plugin state unavailable");
   }
   const std::string surface_id = GetStringValue(args, "surfaceId", "default");
-  const uint64_t handle = static_cast<uint64_t>(
-      GetIntValue(args == nullptr ? nullptr : fl_value_lookup_string(args, "handle"), 0));
-  const uint32_t width =
-      static_cast<uint32_t>(GetClampedInt(args, "width", 512, 1, 16384));
-  const uint32_t height =
-      static_cast<uint32_t>(GetClampedInt(args, "height", 512, 1, 16384));
+  const DmaBufParams params = GetDmaBufParams(args);
 
-  if (handle == 0) {
-    return make_error_response("invalid-handle", "Handle is required");
+  if (params.fd < 0) {
+    return make_error_response("invalid-fd", "DMA-BUF fd is required");
   }
-  if (engine_ensure_linux_present(handle, width, height) == 0) {
-    return make_error_response("present-failed", "Failed to create Linux present target");
+
+  // Import the DMA-BUF into an OpenGL texture.
+  if (g_dmabuf_import_supported != 1) {
+    detect_dmabuf_import_support(eglGetCurrentDisplay());
+  }
+  if (g_dmabuf_import_supported != 1) {
+    return make_error_response("dmabuf-unsupported", "EGL DMA-BUF import not supported");
+  }
+
+  GLuint gl_texture = import_dmabuf_to_gl_texture(params);
+  // Close the fd — the EGL image holds a reference now.
+  close(params.fd);
+  if (gl_texture == 0) {
+    return make_error_response("import-failed", "Failed to import DMA-BUF into GL texture");
   }
 
   std::shared_ptr<SurfaceState> surface;
@@ -381,9 +372,13 @@ static FlMethodResponse* handle_create_surface(FlutterWgpuTexturePlugin* self, F
   }
   {
     std::lock_guard<std::mutex> lock(surface->mutex);
-    surface->engine_handle = handle;
-    surface->width = width;
-    surface->height = height;
+    release_surface_texture(surface);
+    surface->gl_texture_name = gl_texture;
+    surface->width = params.width;
+    surface->height = params.height;
+    surface->imported_width = params.width;
+    surface->imported_height = params.height;
+
     if (surface->texture == nullptr) {
       g_autoptr(FlTexture) texture = flutter_wgpu_linux_texture_new(surface);
       if (!fl_texture_registrar_register_texture(self->state->texture_registrar, texture)) {
@@ -396,10 +391,8 @@ static FlMethodResponse* handle_create_surface(FlutterWgpuTexturePlugin* self, F
 
   g_autoptr(FlValue) result = fl_value_new_map();
   fl_value_set_string_take(result, "textureId", fl_value_new_int(surface->texture_id));
-  fl_value_set_string_take(
-      result, "backend", fl_value_new_string(BackendName(engine_get_backend(handle))));
-  fl_value_set_string_take(result, "width", fl_value_new_int(width));
-  fl_value_set_string_take(result, "height", fl_value_new_int(height));
+  fl_value_set_string_take(result, "width", fl_value_new_int(params.width));
+  fl_value_set_string_take(result, "height", fl_value_new_int(params.height));
   return make_success_response(result);
 }
 
@@ -408,12 +401,8 @@ static FlMethodResponse* handle_resize_surface(FlutterWgpuTexturePlugin* self, F
     return make_error_response("unavailable", "Plugin state unavailable");
   }
   const std::string surface_id = GetStringValue(args, "surfaceId", "default");
-  const uint64_t handle = static_cast<uint64_t>(
-      GetIntValue(args == nullptr ? nullptr : fl_value_lookup_string(args, "handle"), 0));
-  const uint32_t width =
-      static_cast<uint32_t>(GetClampedInt(args, "width", 512, 1, 16384));
-  const uint32_t height =
-      static_cast<uint32_t>(GetClampedInt(args, "height", 512, 1, 16384));
+  const DmaBufParams params = GetDmaBufParams(args);
+
   std::shared_ptr<SurfaceState> surface;
   {
     std::lock_guard<std::mutex> lock(self->state->mutex);
@@ -423,15 +412,25 @@ static FlMethodResponse* handle_resize_surface(FlutterWgpuTexturePlugin* self, F
     }
     surface = it->second;
   }
-  if (engine_resize(handle, width, height) == 0 ||
-      engine_ensure_linux_present(handle, width, height) == 0) {
-    return make_error_response("resize-failed", "Failed to resize native surface");
+
+  if (params.fd < 0) {
+    return make_error_response("invalid-fd", "DMA-BUF fd is required");
   }
+
+  GLuint gl_texture = import_dmabuf_to_gl_texture(params);
+  close(params.fd);
+  if (gl_texture == 0) {
+    return make_error_response("import-failed", "Failed to import DMA-BUF into GL texture");
+  }
+
   {
     std::lock_guard<std::mutex> lock(surface->mutex);
-    surface->width = width;
-    surface->height = height;
     release_surface_texture(surface);
+    surface->gl_texture_name = gl_texture;
+    surface->width = params.width;
+    surface->height = params.height;
+    surface->imported_width = params.width;
+    surface->imported_height = params.height;
   }
   return make_success_response(nullptr);
 }

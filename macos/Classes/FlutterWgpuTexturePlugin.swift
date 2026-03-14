@@ -3,23 +3,9 @@ import CoreVideo
 import FlutterMacOS
 import Metal
 
-@_silgen_name("engine_get_backend")
-private func engine_get_backend(_ handle: UInt64) -> UInt8
-
-@_silgen_name("engine_resize")
-private func engine_resize(_ handle: UInt64, _ width: UInt32, _ height: UInt32) -> UInt8
-
-@_silgen_name("engine_get_mtl_device")
-private func engine_get_mtl_device(_ handle: UInt64) -> UnsafeMutableRawPointer?
-
-@_silgen_name("engine_attach_present_texture")
-private func engine_attach_present_texture(
-  _ handle: UInt64,
-  _ mtlTexturePtr: UnsafeMutableRawPointer?,
-  _ width: UInt32,
-  _ height: UInt32,
-  _ bytesPerRow: UInt32
-)
+// No @_silgen_name declarations — Rust is loaded as a separate dylib by
+// flutter_rust_bridge.  All Rust operations go through the FRB Dart API and
+// the results are forwarded to Swift via the method channel.
 
 private final class FlutterWgpuTextureSurface: NSObject, FlutterTexture {
   var pixelBuffer: CVPixelBuffer
@@ -62,7 +48,6 @@ private final class SurfaceState {
   let surfaceId: String
   let texture: FlutterWgpuTextureSurface
   var textureId: Int64?
-  var handle: UInt64 = 0
   var width: Int
   var height: Int
   var textureCache: CVMetalTextureCache?
@@ -113,14 +98,8 @@ public final class FlutterWgpuTexturePlugin: NSObject, FlutterPlugin {
 
   private func createSurface(args: [String: Any], result: @escaping FlutterResult) {
     let surfaceId = stringValue(args["surfaceId"], fallback: "default")
-    let handle = uint64Value(args["handle"])
     let width = clampedInt(args["width"], fallback: 512)
     let height = clampedInt(args["height"], fallback: 512)
-
-    guard handle != 0 else {
-      result(FlutterError(code: "invalid_handle", message: "Renderer handle is required", details: nil))
-      return
-    }
 
     let entry: SurfaceState = withLock {
       if let existing = surfaces[surfaceId] {
@@ -131,16 +110,16 @@ public final class FlutterWgpuTexturePlugin: NSObject, FlutterPlugin {
       return created
     }
 
-    entry.handle = handle
     if entry.textureId == nil {
       entry.textureId = textureRegistry.register(entry.texture)
     }
 
     do {
-      try attachTexture(entry: entry, width: width, height: height)
+      let (mtlTexturePtr, bytesPerRow) = try makeMetalTexture(entry: entry, width: width, height: height)
       result([
         "textureId": entry.textureId!,
-        "backend": backendName(engine_get_backend(handle)),
+        "mtlTexturePtr": mtlTexturePtr,
+        "bytesPerRow": bytesPerRow,
         "width": width,
         "height": height,
       ])
@@ -151,7 +130,6 @@ public final class FlutterWgpuTexturePlugin: NSObject, FlutterPlugin {
 
   private func resizeSurface(args: [String: Any], result: @escaping FlutterResult) {
     let surfaceId = stringValue(args["surfaceId"], fallback: "default")
-    let handle = uint64Value(args["handle"])
     let width = clampedInt(args["width"], fallback: 512)
     let height = clampedInt(args["height"], fallback: 512)
 
@@ -159,14 +137,16 @@ public final class FlutterWgpuTexturePlugin: NSObject, FlutterPlugin {
       result(nil)
       return
     }
-    guard engine_resize(handle, UInt32(width), UInt32(height)) != 0 else {
-      result(FlutterError(code: "resize_failed", message: "engine_resize returned 0", details: nil))
-      return
-    }
 
     do {
-      try attachTexture(entry: entry, width: width, height: height)
-      result(nil)
+      let (mtlTexturePtr, bytesPerRow) = try makeMetalTexture(entry: entry, width: width, height: height)
+      result([
+        "textureId": entry.textureId ?? -1,
+        "mtlTexturePtr": mtlTexturePtr,
+        "bytesPerRow": bytesPerRow,
+        "width": width,
+        "height": height,
+      ])
     } catch {
       result(FlutterError(code: "resize_failed", message: error.localizedDescription, details: nil))
     }
@@ -189,13 +169,18 @@ public final class FlutterWgpuTexturePlugin: NSObject, FlutterPlugin {
     result(nil)
   }
 
-  private func attachTexture(entry: SurfaceState, width: Int, height: Int) throws {
-    guard let devicePtr = engine_get_mtl_device(entry.handle) else {
+  /// Allocate (or reallocate) the CVPixelBuffer + Metal texture for `entry`.
+  ///
+  /// Uses `MTLCreateSystemDefaultDevice()` — wgpu picks the same device on
+  /// single-GPU Macs, which is the common case.  Returns the raw
+  /// `id<MTLTexture>` pointer and bytes-per-row so Dart can pass them to
+  /// `attachMetalTexture` via FRB.
+  private func makeMetalTexture(entry: SurfaceState, width: Int, height: Int) throws -> (Int, Int) {
+    guard let mtlDevice = MTLCreateSystemDefaultDevice() else {
       throw NSError(domain: "flutter_wgpu_texture", code: 1, userInfo: [
-        NSLocalizedDescriptionKey: "engine_get_mtl_device returned null"
+        NSLocalizedDescriptionKey: "MTLCreateSystemDefaultDevice returned nil"
       ])
     }
-    let mtlDevice = Unmanaged<AnyObject>.fromOpaque(devicePtr).takeUnretainedValue() as! MTLDevice
     var textureCache: CVMetalTextureCache?
     let cacheStatus = CVMetalTextureCacheCreate(kCFAllocatorDefault, nil, mtlDevice, nil, &textureCache)
     guard cacheStatus == kCVReturnSuccess, let resolvedCache = textureCache else {
@@ -235,21 +220,16 @@ public final class FlutterWgpuTexturePlugin: NSObject, FlutterPlugin {
     }
     guard let mtlTexture = CVMetalTextureGetTexture(resolvedCvTexture) else {
       throw NSError(domain: "flutter_wgpu_texture", code: 4, userInfo: [
-        NSLocalizedDescriptionKey: "CVMetalTextureGetTexture returned null"
+        NSLocalizedDescriptionKey: "CVMetalTextureGetTexture returned nil"
       ])
     }
 
-    let texturePtr = Unmanaged.passRetained(mtlTexture as AnyObject).toOpaque()
-    engine_attach_present_texture(
-      entry.handle,
-      texturePtr,
-      UInt32(width),
-      UInt32(height),
-      UInt32(bytesPerRow)
-    )
+    // Retain the texture so the pointer stays valid until Rust releases it.
+    let texturePtr = Int(bitPattern: Unmanaged.passRetained(mtlTexture as AnyObject).toOpaque())
 
     entry.textureCache = resolvedCache
     entry.presentTexture = resolvedCvTexture
+    return (texturePtr, bytesPerRow)
   }
 
   private func withLock<T>(_ body: () -> T) -> T {
@@ -268,16 +248,6 @@ public final class FlutterWgpuTexturePlugin: NSObject, FlutterPlugin {
     return fallback
   }
 
-  private func uint64Value(_ value: Any?) -> UInt64 {
-    if let number = value as? NSNumber {
-      return number.uint64Value
-    }
-    if let string = value as? String {
-      return UInt64(string) ?? 0
-    }
-    return 0
-  }
-
   private func clampedInt(_ value: Any?, fallback: Int) -> Int {
     let resolved: Int
     if let number = value as? NSNumber {
@@ -288,18 +258,5 @@ public final class FlutterWgpuTexturePlugin: NSObject, FlutterPlugin {
       resolved = fallback
     }
     return max(1, min(16384, resolved))
-  }
-
-  private func backendName(_ backend: UInt8) -> String {
-    switch backend {
-    case 1:
-      return "metal"
-    case 2:
-      return "dx12"
-    case 3:
-      return "vulkan"
-    default:
-      return "unknown"
-    }
   }
 }

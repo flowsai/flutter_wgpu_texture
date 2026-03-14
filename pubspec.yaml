@@ -2,6 +2,21 @@ name: flutter_wgpu_texture
 description: "Flutter plugin for building 2D and 3D wgpu apps on desktop and web."
 version: 0.2.0
 homepage: https://github.com/flowsai/flutter_wgpu_texture
+repository: https://github.com/flowsai/flutter_wgpu_texture
+issue_tracker: https://github.com/flowsai/flutter_wgpu_texture/issues
+
+platforms:
+  linux:
+  macos:
+  web:
+  windows:
+
+topics:
+  - flutter
+  - wgpu
+  - graphics
+  - 3d
+  - webgpu
 
 environment:
   sdk: '>=3.10.0 <4.0.0'

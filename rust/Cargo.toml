@@ -4,15 +4,17 @@ version = "0.1.0"
 edition = "2021"
 
 [lib]
-crate-type = ["cdylib", "staticlib"]
+crate-type = ["cdylib", "staticlib", "rlib"]
 
 [dependencies]
+flutter_wgpu_texture_core = { path = "../rust_core" }
 flutter_rust_bridge = "=2.11.1"
 wgpu = "0.19"
 pollster = "0.3"
 bytemuck = { version = "1.14", features = ["derive"] }
 glam = "0.27"
 log = "0.4"
+ctor = "0.2"
 
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
 wgpu-hal = { version = "0.19.5", features = ["metal"] }

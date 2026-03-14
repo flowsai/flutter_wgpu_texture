@@ -7,6 +7,16 @@ mod present;
 pub mod scene;
 mod scenes;
 
+// Re-export FRB boilerplate symbols so a combined workspace cdylib can pull
+// them in via `pub use flutter_wgpu_texture_engine::*`.  These live inside
+// the private `frb_generated` module; surfacing them at the crate root makes
+// them part of the public API without duplicating any definitions.
+#[cfg(not(target_family = "wasm"))]
+pub use frb_generated::{
+    frb_dart_fn_deliver_output, frb_get_rust_content_hash, frb_pde_ffi_dispatcher_primary,
+    frb_pde_ffi_dispatcher_sync,
+};
+
 use std::ffi::c_void;
 
 #[no_mangle]

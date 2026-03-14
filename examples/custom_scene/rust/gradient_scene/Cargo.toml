@@ -1,0 +1,10 @@
+[package]
+name = "gradient_scene"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+flutter_wgpu_texture_core = { path = "../../../../rust_core" }
+wgpu = "0.19"
+bytemuck = { version = "1.14", features = ["derive"] }
+ctor = "0.2"

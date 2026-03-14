@@ -16,6 +16,20 @@ class RustDynamicLibrary {
     if (Platform.isMacOS) {
       final exeDir = p.dirname(Platform.resolvedExecutable);
       final candidates = <String>[
+        // App-level combined workspace (built by the app's hook).
+        // native_toolchain_rust names the framework after the Rust package, so
+        // the combined bridge crate is bundled as custom_scene_bridge.framework.
+        // Checked first: if not present we fall through to the plugin's own dylib.
+        p.normalize(
+          p.join(
+            exeDir,
+            '..',
+            'Frameworks',
+            'custom_scene_bridge.framework',
+            'custom_scene_bridge',
+          ),
+        ),
+        // Standard plugin dylib (built by the plugin's own hook).
         p.normalize(
           p.join(
             exeDir,

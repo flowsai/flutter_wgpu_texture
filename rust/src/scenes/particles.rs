@@ -295,3 +295,10 @@ impl Scene for ParticlesScene {
         Ok(())
     }
 }
+
+#[ctor::ctor]
+fn _register_particles() {
+    flutter_wgpu_texture_core::register_scene("particles", |device, _w, _h| {
+        ParticlesScene::new(device).map(|s| Box::new(s) as Box<dyn flutter_wgpu_texture_core::Scene>)
+    });
+}

@@ -285,3 +285,11 @@ impl Scene for ShaderPlaygroundScene {
         Ok(())
     }
 }
+
+#[ctor::ctor]
+fn _register_shader_playground() {
+    flutter_wgpu_texture_core::register_scene("shader_playground", |device, _w, _h| {
+        ShaderPlaygroundScene::new(device)
+            .map(|s| Box::new(s) as Box<dyn flutter_wgpu_texture_core::Scene>)
+    });
+}

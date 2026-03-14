@@ -60,12 +60,30 @@ See the [API reference](https://pub.dev/documentation/flutter_wgpu_texture) for 
 | [spinning_cube](./examples/spinning_cube) | Rotating 3D cube with color controls |
 | [particles](./examples/particles) | Particle scene with size and motion controls |
 | [shader_playground](./examples/shader_playground) | Live WGSL shader editor with uniform sliders |
+| [custom_scene](./examples/custom_scene) | Animated gradient — custom scene outside the plugin |
 
 ```bash
 cd examples/spinning_cube
 flutter pub get
 flutter run -d macos  # or windows / linux
 ```
+
+## Custom scenes
+
+You can implement your own GPU scene in Rust **without forking the plugin**.
+The plugin's renderer is split into two crates:
+
+- **`flutter_wgpu_texture_core`** — the `Scene` trait, `SceneRenderArgs`, and a
+  global scene registry (published to crates.io).
+- **`flutter_wgpu_texture`** — the FRB API, C exports, and built-in scenes.
+
+Add a Rust workspace to your app that links both the engine and your scene crate
+into a single replacement dylib.  Your scene self-registers via `#[ctor::ctor]`
+at load time, and Dart selects it with `sceneType: 'my_scene'`.
+
+See **[docs/custom_scene.md](./docs/custom_scene.md)** for the step-by-step
+guide and **[examples/custom_scene/](./examples/custom_scene)** for a complete
+reference implementation (animated gradient with runtime colour controls).
 
 ## Architecture
 
@@ -75,4 +93,5 @@ a shared Metal / D3D12 / DMA-BUF surface that Flutter composites as a texture.
 
 - [docs/architecture.md](./docs/architecture.md)
 - [docs/extending_rust_logic.md](./docs/extending_rust_logic.md)
+- [docs/custom_scene.md](./docs/custom_scene.md)
 - [docs/platforms.md](./docs/platforms.md)

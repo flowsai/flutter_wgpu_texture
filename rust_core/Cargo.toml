@@ -1,0 +1,13 @@
+[package]
+name = "flutter_wgpu_texture_core"
+version = "0.1.0"
+edition = "2021"
+description = "Core trait and scene registry for flutter_wgpu_texture"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/flowsai/flutter_wgpu_texture"
+keywords = ["flutter", "wgpu", "gpu", "scene"]
+categories = ["graphics", "rendering"]
+
+[dependencies]
+wgpu = "0.19"
+ctor = "0.2"

@@ -331,3 +331,10 @@ impl Scene for CubeScene {
         Ok(())
     }
 }
+
+#[ctor::ctor]
+fn _register_cube() {
+    flutter_wgpu_texture_core::register_scene("cube", |device, w, h| {
+        CubeScene::new(device, w, h).map(|s| Box::new(s) as Box<dyn flutter_wgpu_texture_core::Scene>)
+    });
+}

@@ -1,0 +1,23 @@
+# Combined workspace: bundles the plugin engine + custom gradient scene into a
+# single cdylib that replaces the plugin's own libflutter_wgpu_texture.
+[workspace]
+members = ["gradient_scene"]
+
+[package]
+name = "custom_scene_bridge"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+# native_toolchain_rust renames the output to libflutter_wgpu_texture based on
+# assetName in hook/build.dart. No manual name override needed here.
+crate-type = ["staticlib", "cdylib"]
+
+[dependencies]
+# Plugin engine: provides all FRB API and C exports.
+# Renamed to avoid a clash with our own [lib] name = "flutter_wgpu_texture".
+# Compiled as rlib for linking here; cdylib is only built when this package
+# itself is the direct build target.
+flutter_wgpu_texture_engine = { path = "../../../rust", package = "flutter_wgpu_texture" }
+# Custom scene crate: registers itself via #[ctor] at dylib load time.
+gradient_scene = { path = "gradient_scene" }

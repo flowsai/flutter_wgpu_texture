@@ -442,7 +442,7 @@ dependencies = [
 
 [[package]]
 name = "flutter_wgpu_texture"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "ash",
  "bytemuck",
@@ -461,7 +461,7 @@ dependencies = [
 
 [[package]]
 name = "flutter_wgpu_texture_core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "ctor",
  "wgpu",

@@ -1,3 +1,7 @@
+## 0.2.1
+
+* Refined pub.dev package metadata and topics.
+
 ## 0.2.0
 
 * **Web support**: the plugin now runs in any modern browser.

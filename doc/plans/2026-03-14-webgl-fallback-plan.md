@@ -592,7 +592,7 @@ void main() {
       <Object?>[_program, name],
     );
     if (loc == null) throw StateError('WebGL uniform "$name" not found.');
-    // Location objects are opaque — store as int index via JS.
+    // Location objects are opaque JS objects, not integers. Do not store them as `int`.
     // We store the raw JS object and cast it when needed.
     return 0; // placeholder — see note below
   }

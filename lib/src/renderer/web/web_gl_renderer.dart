@@ -249,13 +249,10 @@ void main() {
       <Object?>[shader, 0x8B81],
     );
     if (!compiled) {
-      final log = js_util.callMethod<String?>(
-        gl,
-        'getShaderInfoLog',
-        <Object?>[shader],
-      );
+      final log = js_util.callMethod<String?>(gl, 'getShaderInfoLog', <Object?>[shader]) ?? '';
+      js_util.callMethod<void>(gl, 'deleteShader', <Object?>[shader]);
       throw StateError(
-        'WebGL2 shader (type=0x${type.toRadixString(16)}) compile failed: $log',
+        'WebGL2 shader compile failed: $log',
       );
     }
 

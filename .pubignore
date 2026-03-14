@@ -1,5 +1,7 @@
-# Additional examples (beyond the canonical example/)
-examples/
+# Additional examples (beyond the canonical pub.dev example/)
+example/particles/
+example/shader_playground/
+example/custom_scene/
 
 # Rust build artifacts
 rust/target/

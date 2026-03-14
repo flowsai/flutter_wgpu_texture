@@ -35,7 +35,7 @@ migrate_working_dir/
 # Rust build artifacts
 rust/target/
 rust_core/target/
-examples/*/rust/target/
+example/*/rust/target/
 
 # Example build outputs
 example/build/

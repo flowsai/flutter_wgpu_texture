@@ -31,7 +31,7 @@ pub(crate) struct PresentTextureTarget {
     #[cfg(target_os = "linux")]
     dma_buf_image: Option<Arc<OwnedDmaBufImage>>,
     #[cfg(target_os = "windows")]
-    dxgi_handle: Option<winnt::HANDLE>,
+    dxgi_handle: Option<usize>,
 }
 
 impl PresentTextureTarget {
@@ -50,7 +50,7 @@ impl PresentTextureTarget {
 
     #[cfg(target_os = "windows")]
     pub(crate) fn take_dxgi_handle(&mut self) -> Option<usize> {
-        self.dxgi_handle.take().map(|handle| handle as usize)
+        self.dxgi_handle.take()
     }
 }
 
@@ -59,7 +59,7 @@ impl Drop for PresentTextureTarget {
     fn drop(&mut self) {
         if let Some(handle) = self.dxgi_handle.take() {
             unsafe {
-                CloseHandle(handle);
+                CloseHandle(handle as winnt::HANDLE);
             }
         }
     }
@@ -290,6 +290,6 @@ pub(crate) fn create_dxgi_shared_present_target(
         height,
         #[cfg(target_os = "linux")]
         dma_buf_image: None,
-        dxgi_handle: Some(shared_handle),
+        dxgi_handle: Some(shared_handle as usize),
     })
 }

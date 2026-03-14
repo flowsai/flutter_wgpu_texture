@@ -532,10 +532,11 @@ pub(crate) fn invoke_command(handle: u64, command: &str, payload: &str) -> Resul
 pub(crate) fn create_dxgi_surface(handle: u64, width: u32, height: u32) -> Result<usize, String> {
     let renderer =
         lookup_renderer(handle).ok_or_else(|| "renderer handle not found".to_string())?;
-    renderer
+    let surface_handle = renderer
         .lock()
         .unwrap_or_else(|err| err.into_inner())
-        .create_dxgi_surface(width, height)
+        .create_dxgi_surface(width, height)?;
+    Ok(surface_handle)
 }
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]

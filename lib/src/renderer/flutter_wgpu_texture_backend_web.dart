@@ -107,22 +107,30 @@ class _WebFlutterWgpuTextureBackend implements FlutterWgpuTextureBackend {
 
     final hasWebGpu =
         js_util.getProperty<Object?>(web.window.navigator, 'gpu') != null;
-    _renderer = hasWebGpu ? WebGpuRenderer() : WebGlRenderer();
+    final candidates = hasWebGpu
+        ? [WebGpuRenderer(), WebGlRenderer()]
+        : [WebGlRenderer()];
 
-    try {
-      await _renderer!.init(_canvas, sceneType, size);
-      _initialized = true;
-      _backendInfo = rust_api.BackendInfo(
-        backend: _renderer!.backendName,
-        deviceName: 'Browser GPU Adapter',
-        driver: 'web',
-      );
-      await requestFrame();
-      if (autoStart) await startAnimation();
-    } catch (error) {
-      _unsupportedReason = '${_renderer!.backendName} initialization failed: $error';
-      _renderer = null;
+    for (final candidate in candidates) {
+      try {
+        await candidate.init(_canvas, sceneType, size);
+        _renderer = candidate;
+        _initialized = true;
+        _backendInfo = rust_api.BackendInfo(
+          backend: candidate.backendName,
+          deviceName: 'Browser GPU Adapter',
+          driver: 'web',
+        );
+        await requestFrame();
+        if (autoStart) await startAnimation();
+        return;
+      } catch (_) {
+        candidate.dispose();
+      }
     }
+
+    _unsupportedReason = 'No supported GPU backend available (tried: '
+        '${candidates.map((c) => c.backendName).join(', ')}).';
   }
 
   @override

@@ -9,7 +9,7 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_wgpu_texture:
-    path: ../..
+    path: ..
 
 dev_dependencies:
   flutter_test:

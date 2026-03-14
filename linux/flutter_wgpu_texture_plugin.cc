@@ -16,10 +16,9 @@
 #include <unistd.h>
 #include <vector>
 
-// No extern "C" Rust declarations — Rust is compiled as a separate dylib
-// loaded by flutter_rust_bridge.  All Rust operations happen in Dart via FRB;
-// DMA-BUF file descriptor and metadata are forwarded here via the method
-// channel so this file can create the EGL image / GL texture.
+// Rust is loaded separately via flutter_rust_bridge. On Linux, Dart forwards
+// DMA-BUF metadata here so the Flutter GL texture can import it when populate()
+// runs with a current EGL context.
 
 namespace {
 
@@ -52,6 +51,8 @@ struct SurfaceState {
   uint32_t height = 1;
   uint32_t imported_width = 0;
   uint32_t imported_height = 0;
+  DmaBufParams pending_dmabuf;
+  bool has_pending_dmabuf = false;
   std::mutex mutex;
 };
 
@@ -235,6 +236,40 @@ void release_surface_texture(const std::shared_ptr<SurfaceState>& surface) {
   }
 }
 
+void release_pending_dmabuf(const std::shared_ptr<SurfaceState>& surface) {
+  if (surface == nullptr) {
+    return;
+  }
+  if (surface->has_pending_dmabuf && surface->pending_dmabuf.fd >= 0) {
+    close(surface->pending_dmabuf.fd);
+  }
+  surface->pending_dmabuf = DmaBufParams{};
+  surface->has_pending_dmabuf = false;
+}
+
+void stash_pending_dmabuf(const std::shared_ptr<SurfaceState>& surface,
+                          const DmaBufParams& params) {
+  release_pending_dmabuf(surface);
+  surface->pending_dmabuf = params;
+  surface->has_pending_dmabuf = true;
+  surface->width = params.width;
+  surface->height = params.height;
+}
+
+GLuint import_pending_dmabuf(const std::shared_ptr<SurfaceState>& surface) {
+  if (surface == nullptr || !surface->has_pending_dmabuf) {
+    return 0;
+  }
+
+  GLuint gl_texture = import_dmabuf_to_gl_texture(surface->pending_dmabuf);
+  if (surface->pending_dmabuf.fd >= 0) {
+    close(surface->pending_dmabuf.fd);
+  }
+  surface->pending_dmabuf = DmaBufParams{};
+  surface->has_pending_dmabuf = false;
+  return gl_texture;
+}
+
 typedef struct _FlutterWgpuLinuxTexture FlutterWgpuLinuxTexture;
 typedef struct _FlutterWgpuLinuxTextureClass FlutterWgpuLinuxTextureClass;
 
@@ -268,18 +303,32 @@ gboolean flutter_wgpu_linux_texture_populate(FlTextureGL* texture,
   const uint32_t pixel_height = std::max(surface->height, 1u);
 
   if (g_dmabuf_import_supported != 1) {
-    detect_dmabuf_import_support(eglGetCurrentDisplay());
+    EGLDisplay egl_display = eglGetCurrentDisplay();
+    if (egl_display != EGL_NO_DISPLAY) {
+      detect_dmabuf_import_support(egl_display);
+    }
   }
   if (g_dmabuf_import_supported != 1) {
     g_warning("DMA-BUF populate failed: EGL import support unavailable");
     return FALSE;
   }
 
-  // The GL texture is re-imported whenever the surface size changes.
-  // The Dart layer (via FRB + method channel) always calls resizeSurface before
-  // the next frame when dimensions change, which clears gl_texture_name.
+  if (surface->has_pending_dmabuf) {
+    // Import only when Flutter calls populate(), which guarantees a current
+    // EGL/GL context for eglCreateImageKHR + glEGLImageTargetTexture2DOES.
+    GLuint gl_texture = import_pending_dmabuf(surface);
+    if (gl_texture == 0) {
+      g_warning("DMA-BUF populate failed: GL import returned texture 0");
+      return FALSE;
+    }
+    release_surface_texture(surface);
+    surface->gl_texture_name = gl_texture;
+    surface->imported_width = pixel_width;
+    surface->imported_height = pixel_height;
+  }
+
   if (surface->gl_texture_name == 0) {
-    g_warning("DMA-BUF populate: no GL texture yet (waiting for DMA-BUF import)");
+    g_warning("DMA-BUF populate: no imported GL texture available yet");
     return FALSE;
   }
 
@@ -343,21 +392,6 @@ static FlMethodResponse* handle_create_surface(FlutterWgpuTexturePlugin* self, F
     return make_error_response("invalid-fd", "DMA-BUF fd is required");
   }
 
-  // Import the DMA-BUF into an OpenGL texture.
-  if (g_dmabuf_import_supported != 1) {
-    detect_dmabuf_import_support(eglGetCurrentDisplay());
-  }
-  if (g_dmabuf_import_supported != 1) {
-    return make_error_response("dmabuf-unsupported", "EGL DMA-BUF import not supported");
-  }
-
-  GLuint gl_texture = import_dmabuf_to_gl_texture(params);
-  // Close the fd — the EGL image holds a reference now.
-  close(params.fd);
-  if (gl_texture == 0) {
-    return make_error_response("import-failed", "Failed to import DMA-BUF into GL texture");
-  }
-
   std::shared_ptr<SurfaceState> surface;
   {
     std::lock_guard<std::mutex> lock(self->state->mutex);
@@ -373,15 +407,12 @@ static FlMethodResponse* handle_create_surface(FlutterWgpuTexturePlugin* self, F
   {
     std::lock_guard<std::mutex> lock(surface->mutex);
     release_surface_texture(surface);
-    surface->gl_texture_name = gl_texture;
-    surface->width = params.width;
-    surface->height = params.height;
-    surface->imported_width = params.width;
-    surface->imported_height = params.height;
+    stash_pending_dmabuf(surface, params);
 
     if (surface->texture == nullptr) {
       g_autoptr(FlTexture) texture = flutter_wgpu_linux_texture_new(surface);
       if (!fl_texture_registrar_register_texture(self->state->texture_registrar, texture)) {
+        release_pending_dmabuf(surface);
         return make_error_response("register-failed", "Texture registration failed");
       }
       surface->texture = FL_TEXTURE(g_object_ref(texture));
@@ -417,20 +448,10 @@ static FlMethodResponse* handle_resize_surface(FlutterWgpuTexturePlugin* self, F
     return make_error_response("invalid-fd", "DMA-BUF fd is required");
   }
 
-  GLuint gl_texture = import_dmabuf_to_gl_texture(params);
-  close(params.fd);
-  if (gl_texture == 0) {
-    return make_error_response("import-failed", "Failed to import DMA-BUF into GL texture");
-  }
-
   {
     std::lock_guard<std::mutex> lock(surface->mutex);
     release_surface_texture(surface);
-    surface->gl_texture_name = gl_texture;
-    surface->width = params.width;
-    surface->height = params.height;
-    surface->imported_width = params.width;
-    surface->imported_height = params.height;
+    stash_pending_dmabuf(surface, params);
   }
   return make_success_response(nullptr);
 }
@@ -453,6 +474,7 @@ static FlMethodResponse* handle_dispose_surface(FlutterWgpuTexturePlugin* self, 
   {
     std::lock_guard<std::mutex> lock(surface->mutex);
     release_surface_texture(surface);
+    release_pending_dmabuf(surface);
     if (surface->texture != nullptr) {
       fl_texture_registrar_unregister_texture(self->state->texture_registrar, surface->texture);
       g_object_unref(surface->texture);

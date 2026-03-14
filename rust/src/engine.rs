@@ -569,10 +569,11 @@ pub(crate) fn resize_renderer(handle: u64, width: u32, height: u32) -> Result<()
 pub(crate) fn ensure_linux_present(handle: u64, width: u32, height: u32) -> Result<(), String> {
     let renderer =
         lookup_renderer(handle).ok_or_else(|| "renderer handle not found".to_string())?;
-    renderer
+    let result = renderer
         .lock()
         .unwrap_or_else(|err| err.into_inner())
-        .ensure_linux_present(width, height)
+        .ensure_linux_present(width, height);
+    result
 }
 
 #[cfg(target_os = "linux")]

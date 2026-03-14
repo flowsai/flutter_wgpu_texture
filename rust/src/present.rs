@@ -4,6 +4,8 @@ use metal::foreign_types::ForeignType;
 use metal::MTLTextureType;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 use std::ffi::c_void;
+#[cfg(target_os = "linux")]
+use std::sync::Arc;
 #[cfg(target_os = "windows")]
 use wgpu_hal::api::Dx12;
 #[cfg(target_os = "windows")]

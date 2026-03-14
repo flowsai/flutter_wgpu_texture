@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:flutter_wgpu_texture_particles/main.dart';
+import '../lib/main.dart';
 
 void main() {
   testWidgets('renders particles shell', (tester) async {

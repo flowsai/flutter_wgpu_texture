@@ -55,17 +55,17 @@ class FlutterWgpuPlatformChannel {
     int? modifierLow,
     int? modifierHigh,
   }) async {
-    final args = <String, Object>{
+    final args = <String, Object?>{
       'surfaceId': surfaceId,
       'width': width,
       'height': height,
-      if (dxgiHandle != null) 'dxgiHandle': dxgiHandle,
-      if (fd != null) 'fd': fd,
-      if (stride != null) 'stride': stride,
-      if (offset != null) 'offset': offset,
-      if (fourcc != null) 'fourcc': fourcc,
-      if (modifierLow != null) 'modifierLow': modifierLow,
-      if (modifierHigh != null) 'modifierHigh': modifierHigh,
+      'dxgiHandle': ?dxgiHandle,
+      'fd': ?fd,
+      'stride': ?stride,
+      'offset': ?offset,
+      'fourcc': ?fourcc,
+      'modifierLow': ?modifierLow,
+      'modifierHigh': ?modifierHigh,
     };
     final result = await channel.invokeMethod<Object?>('createSurface', args);
     return NativeSurfaceInfo.fromMap(result as Map<Object?, Object?>);
@@ -90,17 +90,17 @@ class FlutterWgpuPlatformChannel {
     int? modifierLow,
     int? modifierHigh,
   }) async {
-    final args = <String, Object>{
+    final args = <String, Object?>{
       'surfaceId': surfaceId,
       'width': width,
       'height': height,
-      if (dxgiHandle != null) 'dxgiHandle': dxgiHandle,
-      if (fd != null) 'fd': fd,
-      if (stride != null) 'stride': stride,
-      if (offset != null) 'offset': offset,
-      if (fourcc != null) 'fourcc': fourcc,
-      if (modifierLow != null) 'modifierLow': modifierLow,
-      if (modifierHigh != null) 'modifierHigh': modifierHigh,
+      'dxgiHandle': ?dxgiHandle,
+      'fd': ?fd,
+      'stride': ?stride,
+      'offset': ?offset,
+      'fourcc': ?fourcc,
+      'modifierLow': ?modifierLow,
+      'modifierHigh': ?modifierHigh,
     };
     final result = await channel.invokeMethod<Object?>('resizeSurface', args);
     if (result == null) return null;

@@ -79,14 +79,14 @@ void main() {
       throw StateError('WebGL2: could not find uniforms u_mvp or u_color.');
     }
 
-    _gl!.enable(web.WebGL.DEPTH_TEST);
-    _gl!.depthFunc(web.WebGL.LESS);
+    _gl!.enable(web.WebGLRenderingContext.DEPTH_TEST);
+    _gl!.depthFunc(web.WebGLRenderingContext.LESS);
   }
 
   web.WebGLProgram _createProgram(String vertSrc, String fragSrc) {
     final gl = _gl!;
-    final vert = _compileShader(web.WebGL.VERTEX_SHADER, vertSrc);
-    final frag = _compileShader(web.WebGL.FRAGMENT_SHADER, fragSrc);
+    final vert = _compileShader(web.WebGLRenderingContext.VERTEX_SHADER, vertSrc);
+    final frag = _compileShader(web.WebGLRenderingContext.FRAGMENT_SHADER, fragSrc);
 
     final program = gl.createProgram()!;
     gl.attachShader(program, vert);
@@ -94,7 +94,7 @@ void main() {
     gl.linkProgram(program);
 
     final linked =
-        (gl.getProgramParameter(program, web.WebGL.LINK_STATUS)?.dartify() as bool?) ?? false;
+        (gl.getProgramParameter(program, web.WebGLRenderingContext.LINK_STATUS)?.dartify() as bool?) ?? false;
     if (!linked) {
       final log = gl.getProgramInfoLog(program) ?? '';
       gl.deleteShader(vert);
@@ -115,7 +115,7 @@ void main() {
     gl.compileShader(shader);
 
     final compiled =
-        (gl.getShaderParameter(shader, web.WebGL.COMPILE_STATUS)?.dartify() as bool?) ?? false;
+        (gl.getShaderParameter(shader, web.WebGLRenderingContext.COMPILE_STATUS)?.dartify() as bool?) ?? false;
     if (!compiled) {
       final log = gl.getShaderInfoLog(shader) ?? '';
       gl.deleteShader(shader);
@@ -131,15 +131,15 @@ void main() {
     gl.bindVertexArray(_vao);
 
     _vertexBuffer = gl.createBuffer();
-    gl.bindBuffer(web.WebGL.ARRAY_BUFFER, _vertexBuffer);
-    gl.bufferData(web.WebGL.ARRAY_BUFFER, _cubeVertices.toJS, web.WebGL.STATIC_DRAW);
+    gl.bindBuffer(web.WebGLRenderingContext.ARRAY_BUFFER, _vertexBuffer);
+    gl.bufferData(web.WebGLRenderingContext.ARRAY_BUFFER, _cubeVertices.toJS, web.WebGLRenderingContext.STATIC_DRAW);
     gl.enableVertexAttribArray(0);
-    gl.vertexAttribPointer(0, 3, web.WebGL.FLOAT, false, 12, 0);
+    gl.vertexAttribPointer(0, 3, web.WebGLRenderingContext.FLOAT, false, 12, 0);
 
     _indexBuffer = gl.createBuffer();
-    gl.bindBuffer(web.WebGL.ELEMENT_ARRAY_BUFFER, _indexBuffer);
+    gl.bindBuffer(web.WebGLRenderingContext.ELEMENT_ARRAY_BUFFER, _indexBuffer);
     gl.bufferData(
-        web.WebGL.ELEMENT_ARRAY_BUFFER, _cubeIndices.toJS, web.WebGL.STATIC_DRAW);
+        web.WebGLRenderingContext.ELEMENT_ARRAY_BUFFER, _cubeIndices.toJS, web.WebGLRenderingContext.STATIC_DRAW);
 
     gl.bindVertexArray(null);
   }
@@ -159,7 +159,7 @@ void main() {
       backgroundColor[2],
       backgroundColor[3],
     );
-    gl.clear(web.WebGL.COLOR_BUFFER_BIT | web.WebGL.DEPTH_BUFFER_BIT);
+    gl.clear(web.WebGLRenderingContext.COLOR_BUFFER_BIT | web.WebGLRenderingContext.DEPTH_BUFFER_BIT);
 
     gl.useProgram(_program);
     gl.bindVertexArray(_vao);
@@ -170,7 +170,7 @@ void main() {
         _colorUniformLocation, Float32List.fromList(cubeColor).toJS);
 
     gl.drawElements(
-        web.WebGL.TRIANGLES, _cubeIndices.length, web.WebGL.UNSIGNED_SHORT, 0);
+        web.WebGLRenderingContext.TRIANGLES, _cubeIndices.length, web.WebGLRenderingContext.UNSIGNED_SHORT, 0);
 
     gl.bindVertexArray(null);
   }

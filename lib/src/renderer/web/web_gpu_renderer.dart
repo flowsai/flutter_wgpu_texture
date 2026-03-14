@@ -1,4 +1,4 @@
-import 'dart:js_util' as js_util;
+import 'dart:js_util' as js_util; // ignore: avoid_web_libraries_in_flutter, uri_does_not_exist
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui';

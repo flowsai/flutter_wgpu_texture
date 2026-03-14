@@ -70,6 +70,9 @@ void main() {
   Object? _vertexBuffer;
   Object? _indexBuffer;
 
+  Object? _mvpUniformLocation;
+  Object? _colorUniformLocation;
+
   int _canvasWidth = 1;
   int _canvasHeight = 1;
 
@@ -96,6 +99,14 @@ void main() {
 
     _program = _createProgram(_vertShaderSource, _fragShaderSource);
     _setupGeometry();
+
+    _mvpUniformLocation = js_util.callMethod<Object?>(
+      _gl!, 'getUniformLocation', <Object?>[_program, 'u_mvp']);
+    _colorUniformLocation = js_util.callMethod<Object?>(
+      _gl!, 'getUniformLocation', <Object?>[_program, 'u_color']);
+    if (_mvpUniformLocation == null || _colorUniformLocation == null) {
+      throw StateError('WebGL2: could not find expected uniforms u_mvp or u_color.');
+    }
 
     // Enable depth testing.
     js_util.callMethod<void>(_gl!, 'enable', <Object?>[0x0B71]); // DEPTH_TEST
@@ -136,27 +147,17 @@ void main() {
 
     // 6. MVP uniform
     final mvpMatrix = _buildMvpMatrix(rotation);
-    final mvpLoc =
-        js_util.callMethod<Object?>(gl, 'getUniformLocation', <Object?>[
-      _program,
-      'u_mvp',
-    ]);
     js_util.callMethod<void>(
       gl,
       'uniformMatrix4fv',
-      <Object?>[mvpLoc, false, mvpMatrix],
+      <Object?>[_mvpUniformLocation, false, mvpMatrix],
     );
 
     // 7. Color uniform
-    final colorLoc =
-        js_util.callMethod<Object?>(gl, 'getUniformLocation', <Object?>[
-      _program,
-      'u_color',
-    ]);
     js_util.callMethod<void>(
       gl,
       'uniform4fv',
-      <Object?>[colorLoc, Float32List.fromList(cubeColor)],
+      <Object?>[_colorUniformLocation, Float32List.fromList(cubeColor)],
     );
 
     // 8. Draw — TRIANGLES=0x0004, UNSIGNED_SHORT=0x1403
@@ -197,6 +198,8 @@ void main() {
       js_util.callMethod<void>(gl, 'deleteVertexArray', <Object?>[_vao]);
       _vao = null;
     }
+    _mvpUniformLocation = null;
+    _colorUniformLocation = null;
     _gl = null;
   }
 
@@ -221,11 +224,10 @@ void main() {
       <Object?>[program, 0x8B82],
     );
     if (!linked) {
-      final log = js_util.callMethod<String?>(
-        gl,
-        'getProgramInfoLog',
-        <Object?>[program],
-      );
+      final log = js_util.callMethod<String?>(gl, 'getProgramInfoLog', <Object?>[program]) ?? '';
+      js_util.callMethod<void>(gl, 'deleteShader', <Object?>[vert]);
+      js_util.callMethod<void>(gl, 'deleteShader', <Object?>[frag]);
+      js_util.callMethod<void>(gl, 'deleteProgram', <Object?>[program]);
       throw StateError('WebGL2 program link failed: $log');
     }
 

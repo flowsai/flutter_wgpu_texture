@@ -91,6 +91,8 @@ class _WebFlutterWgpuTextureBackend implements FlutterWgpuTextureBackend {
     _size = Size(logicalWidth.toDouble(), logicalHeight.toDouble());
     _resizeCanvas(_size!);
 
+    if (_unsupportedReason != null) return;
+
     if (_initialized) {
       _renderer?.resize(_canvas);
       await requestFrame();

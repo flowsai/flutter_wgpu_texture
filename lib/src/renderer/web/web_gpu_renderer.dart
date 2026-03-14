@@ -227,6 +227,15 @@ fn fs_main() -> @location(0) vec4<f32> {
       _depthTexture = null;
     }
     _depthTextureView = null;
+    if (_uniformBuffer != null) {
+      js_util.callMethod<void>(_uniformBuffer!, 'destroy', const <Object?>[]);
+    }
+    if (_vertexBuffer != null) {
+      js_util.callMethod<void>(_vertexBuffer!, 'destroy', const <Object?>[]);
+    }
+    if (_indexBuffer != null) {
+      js_util.callMethod<void>(_indexBuffer!, 'destroy', const <Object?>[]);
+    }
     _gpu = null;
     _device = null;
     _queue = null;

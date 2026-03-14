@@ -57,13 +57,13 @@ See the [API reference](https://pub.dev/documentation/flutter_wgpu_texture) for 
 
 | Example | Description |
 |---------|-------------|
-| [spinning_cube](./examples/spinning_cube) | Rotating 3D cube with color controls |
-| [particles](./examples/particles) | Particle scene with size and motion controls |
-| [shader_playground](./examples/shader_playground) | Live WGSL shader editor with uniform sliders |
-| [custom_scene](./examples/custom_scene) | Animated gradient — custom scene outside the plugin |
+| [spinning_cube](./example/spinning_cube) | Rotating 3D cube with color controls |
+| [particles](./example/particles) | Particle scene with size and motion controls |
+| [shader_playground](./example/shader_playground) | Live WGSL shader editor with uniform sliders |
+| [custom_scene](./example/custom_scene) | Animated gradient — custom scene outside the plugin |
 
 ```bash
-cd examples/spinning_cube
+cd example/spinning_cube
 flutter pub get
 flutter run -d macos  # or windows / linux
 ```
@@ -81,8 +81,8 @@ Add a Rust workspace to your app that links both the engine and your scene crate
 into a single replacement dylib.  Your scene self-registers via `#[ctor::ctor]`
 at load time, and Dart selects it with `sceneType: 'my_scene'`.
 
-See **[docs/custom_scene.md](./docs/custom_scene.md)** for the step-by-step
-guide and **[examples/custom_scene/](./examples/custom_scene)** for a complete
+See **[doc/custom_scene.md](./doc/custom_scene.md)** for the step-by-step
+guide and **[example/custom_scene/](./example/custom_scene)** for a complete
 reference implementation (animated gradient with runtime colour controls).
 
 ## Architecture
@@ -91,7 +91,7 @@ Built on `flutter_rust_bridge` and `native_toolchain_rust`. The Dart controller
 coordinates a Rust/wgpu renderer via FRB FFI; the renderer writes directly into
 a shared Metal / D3D12 / DMA-BUF surface that Flutter composites as a texture.
 
-- [docs/architecture.md](./docs/architecture.md)
-- [docs/extending_rust_logic.md](./docs/extending_rust_logic.md)
-- [docs/custom_scene.md](./docs/custom_scene.md)
-- [docs/platforms.md](./docs/platforms.md)
+- [doc/architecture.md](./doc/architecture.md)
+- [doc/extending_rust_logic.md](./doc/extending_rust_logic.md)
+- [doc/custom_scene.md](./doc/custom_scene.md)
+- [doc/platforms.md](./doc/platforms.md)

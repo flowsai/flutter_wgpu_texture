@@ -24,7 +24,7 @@ Renders GPU content on macOS, Windows, Linux, and web via Rust-powered native an
 ```yaml
 dependencies:
   flutter_wgpu_texture:
-    ^0.2.0
+    ^0.2.1
 ```
 
 **Requirements:**

@@ -20,6 +20,13 @@ class FlutterWgpuTextureController extends ChangeNotifier {
          surfaceId: _makeSurfaceId(),
        );
 
+  @visibleForTesting
+  FlutterWgpuTextureController.withBackend({
+    required FlutterWgpuTextureBackend backend,
+    this.autoStart = true,
+    this.sceneType = 'cube',
+  }) : _backend = backend;
+
   final bool autoStart;
   final String sceneType;
   final FlutterWgpuTextureBackend _backend;

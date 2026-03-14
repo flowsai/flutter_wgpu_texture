@@ -4,7 +4,12 @@ import 'package:flutter_wgpu_texture/flutter_wgpu_texture.dart';
 void main() => runApp(const SpinningCubeApp());
 
 class SpinningCubeApp extends StatefulWidget {
-  const SpinningCubeApp({super.key});
+  const SpinningCubeApp({
+    super.key,
+    this.controller,
+  });
+
+  final FlutterWgpuTextureController? controller;
 
   @override
   State<SpinningCubeApp> createState() => _SpinningCubeAppState();
@@ -12,18 +17,22 @@ class SpinningCubeApp extends StatefulWidget {
 
 class _SpinningCubeAppState extends State<SpinningCubeApp> {
   late final FlutterWgpuTextureController controller;
+  late final bool ownsController;
   Color cubeColor = const Color(0xFFFFD400);
   Color backgroundColor = const Color(0xFF1B5CFF);
 
   @override
   void initState() {
     super.initState();
-    controller = FlutterWgpuTextureController();
+    ownsController = widget.controller == null;
+    controller = widget.controller ?? FlutterWgpuTextureController();
   }
 
   @override
   void dispose() {
-    controller.dispose();
+    if (ownsController) {
+      controller.dispose();
+    }
     super.dispose();
   }
 

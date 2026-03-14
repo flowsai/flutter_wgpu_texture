@@ -14,8 +14,9 @@ platforms:
 topics:
   - flutter
   - wgpu
+  - bevy
   - graphics
-  - 3d
+  - graphics-3d
   - webgpu
 
 environment:

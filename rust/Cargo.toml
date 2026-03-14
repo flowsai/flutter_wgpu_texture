@@ -1,13 +1,19 @@
 [package]
 name = "flutter_wgpu_texture"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
+description = "Flutter texture plugin runtime powered by Rust and wgpu."
+license = "MIT"
+repository = "https://github.com/flowsai/flutter_wgpu_texture"
+homepage = "https://github.com/flowsai/flutter_wgpu_texture"
+keywords = ["flutter", "wgpu", "gpu", "texture"]
+categories = ["graphics", "rendering"]
 
 [lib]
 crate-type = ["cdylib", "staticlib", "rlib"]
 
 [dependencies]
-flutter_wgpu_texture_core = { path = "../rust_core" }
+flutter_wgpu_texture_core = { version = "0.2.0", path = "../rust_core" }
 flutter_rust_bridge = "=2.11.1"
 wgpu = "0.19"
 pollster = "0.3"

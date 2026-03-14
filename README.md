@@ -1,5 +1,10 @@
 # flutter_wgpu_texture
 
+[![pub.dev](https://img.shields.io/pub/v/flutter_wgpu_texture.svg)](https://pub.dev/packages/flutter_wgpu_texture)
+[![crates.io](https://img.shields.io/crates/v/flutter_wgpu_texture.svg)](https://crates.io/crates/flutter_wgpu_texture)
+[![core crate](https://img.shields.io/crates/v/flutter_wgpu_texture_core.svg)](https://crates.io/crates/flutter_wgpu_texture_core)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+
 ![screenshot-wgpu-texture](https://i.imgur.com/LvecF8R.png)
 
 Flutter plugin for building 2D and 3D [`wgpu`](https://wgpu.rs/) apps in Flutter.

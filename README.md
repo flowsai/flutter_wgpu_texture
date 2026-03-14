@@ -2,8 +2,8 @@
 
 ![screenshot-wgpu-texture](https://i.imgur.com/LvecF8R.png)
 
-Flutter texture plugin powered by Rust and [`wgpu`](https://wgpu.rs/).
-Renders GPU content on macOS, Windows, Linux, and web.
+Flutter plugin for building 2D and 3D [`wgpu`](https://wgpu.rs/) apps in Flutter.
+Renders GPU content on macOS, Windows, Linux, and web via Rust-powered native and web backends.
 
 | Platform | Supported | Backend |
 |----------|-----------|---------|

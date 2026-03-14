@@ -1,5 +1,5 @@
 name: flutter_wgpu_texture
-description: "Desktop Flutter texture plugin powered by Rust and wgpu."
+description: "Flutter plugin for building 2D and 3D wgpu apps on desktop and web."
 version: 0.2.0
 homepage: https://github.com/flowsai/flutter_wgpu_texture
 

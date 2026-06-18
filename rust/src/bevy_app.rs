@@ -973,21 +973,23 @@ fn point_segment_dist(p: Vec2, a: Vec2, b: Vec2) -> f32 {
     p.distance(a + ab * t)
 }
 
-/// Signed distance `s` along the axis line `origin + s*dir` of the point closest
-/// to the cursor `ray`. `None` if the ray is ~parallel to the axis.
+/// Signed distance along the axis line `origin + t*dir` of the point closest to
+/// the cursor `ray` (the `tb` from a normalized ray-to-ray closest-point solve,
+/// matching the `transform-gizmo` crate). `dir` must be unit length.
+/// `None` if the ray is ~parallel to the axis.
 fn ray_axis_param(ray: Ray3d, origin: Vec3, dir: Vec3) -> Option<f32> {
-    let rd = *ray.direction;
-    let w0 = ray.origin - origin;
-    let a = dir.dot(dir);
-    let b = dir.dot(rd);
-    let c = rd.dot(rd);
-    let d = dir.dot(w0);
-    let e = rd.dot(w0);
-    let denom = a * c - b * b;
+    let adir = *ray.direction; // unit
+    let bdir = dir; // unit
+    let b = adir.dot(bdir);
+    let w = ray.origin - origin;
+    let d = adir.dot(w);
+    let e = bdir.dot(w);
+    let denom = 1.0 - b * b;
     if denom.abs() < 1e-6 {
         return None;
     }
-    Some((b * e - c * d) / denom)
+    // tb: parameter along the axis (bdir) of its closest point to the ray.
+    Some((e - b * d) / denom)
 }
 
 fn drag_begin(sub_apps: &mut SubApps, image: AssetId<Image>, cursor: Vec2) -> bool {
@@ -1163,22 +1165,22 @@ fn drag_update_system(
             new_t.translation = start.translation + axis_dir * along_axis;
         }
         GizmoMode::Rotate => {
-            // Screen swing angle of the cursor around the projected center.
+            // Angle of cursor around the projected gizmo center (screen space),
+            // following the `transform-gizmo` crate's convention:
+            //   angle = atan2(now) - atan2(start)
+            //   flip when the camera views the axis from behind (forward·axis < 0)
+            //   delta_quat = from_axis_angle(world_axis, angle); new = delta * start
             let a0 = drag.start_cursor - origin2d;
             let a1 = cursor - origin2d;
             if a0.length_squared() < 4.0 || a1.length_squared() < 4.0 {
                 return None;
             }
-            // `perp_dot` > 0 ⇒ CCW in screen (Y-down) space, which is CW visually.
-            let screen_angle = a0.angle_to(a1);
-            // The world axis projects to a screen normal; whether a CW screen
-            // swing corresponds to +rotation about the axis depends on whether
-            // the axis points toward or away from the camera. Use the axis's
-            // depth direction relative to the camera->object view ray.
-            let view_dir = (start.translation - cam_xf.translation()).normalize_or_zero();
-            let toward_camera = axis_dir.dot(view_dir); // >0 ⇒ axis points away from camera
-            let angle = screen_angle * toward_camera.signum();
-            new_t.rotation = (start.rotation * Quat::from_axis_angle(axis_dir, angle)).normalize();
+            let mut angle = a1.y.atan2(a1.x) - a0.y.atan2(a0.x);
+            if cam_xf.forward().dot(axis_dir) < 0.0 {
+                angle = -angle;
+            }
+            new_t.rotation =
+                (Quat::from_axis_angle(axis_dir, angle) * start.rotation).normalize();
         }
         GizmoMode::Scale => {
             // Same signed on-screen amount as translate → grow when dragging the

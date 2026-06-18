@@ -2,7 +2,7 @@
 //!
 //! The editor owns the scene tree; it pushes the whole thing as JSON via
 //! `set_scene(handle, json)`. The render thread diffs it against the live ECS
-//! world (see `bevy_app::rebuild_scene`).
+//! world (see `level::rebuild_scene`).
 
 use bevy::prelude::{Quat, Transform};
 use serde::Deserialize;

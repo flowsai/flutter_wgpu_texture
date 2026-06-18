@@ -1,5 +1,4 @@
 pub mod api;
-mod bevy_app;
 mod engine;
 mod frb_generated;
 mod gizmo;

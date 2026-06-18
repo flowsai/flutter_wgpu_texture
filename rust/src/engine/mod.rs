@@ -1,9 +1,12 @@
-//! Renderer registry + device context.
+//! Renderer registry + device context (≈ Flax Engine orchestration).
 //!
 //! The actual rendering is performed by Bevy on a dedicated thread (see
-//! `bevy_app`). This module keeps the per-viewport handle bookkeeping, the
-//! shared wgpu device borrowed from Bevy, and the Linux DMA-BUF present/export
-//! path that bridges the rendered frame to Flutter.
+//! `device`/`render_thread`). This module keeps the per-viewport handle
+//! bookkeeping, the shared wgpu device borrowed from Bevy, and the Linux
+//! DMA-BUF present/export path that bridges the rendered frame to Flutter.
+
+pub(crate) mod device;
+pub(crate) mod render_thread;
 
 use std::collections::HashMap;
 use std::ffi::c_void;
@@ -13,10 +16,10 @@ use bevy::asset::AssetId;
 use bevy::image::Image;
 
 use crate::api::BackendInfo;
-use crate::bevy_app::{self, RenderCmd};
 #[cfg(target_os = "linux")]
 use crate::linux_dma_buf;
 use crate::present::{self, PresentTextureTarget};
+use render_thread::RenderCmd;
 
 pub(crate) const BACKEND_UNKNOWN: u8 = 0;
 pub(crate) const BACKEND_METAL: u8 = 1;
@@ -76,7 +79,7 @@ fn device_context() -> Result<&'static EngineDeviceContext, String> {
     static DEVICE_CONTEXT: OnceLock<Result<EngineDeviceContext, String>> = OnceLock::new();
     DEVICE_CONTEXT
         .get_or_init(|| {
-            let gpu = bevy_app::ensure_started()?;
+            let gpu = device::ensure_started()?;
             Ok(EngineDeviceContext {
                 device: gpu.device.clone(),
                 queue: gpu.queue.clone(),
@@ -96,7 +99,7 @@ impl Renderer {
 
         // Create the viewport (camera + offscreen image) on the render thread.
         let (reply_tx, reply_rx) = std::sync::mpsc::channel();
-        bevy_app::send(RenderCmd::CreateViewport {
+        device::send(RenderCmd::CreateViewport {
             width: width.max(1),
             height: height.max(1),
             reply: reply_tx,
@@ -119,7 +122,7 @@ impl Renderer {
     fn resize(&mut self, width: u32, height: u32) {
         self.width = width.max(1);
         self.height = height.max(1);
-        let _ = bevy_app::send(RenderCmd::ResizeViewport {
+        let _ = device::send(RenderCmd::ResizeViewport {
             image: self.viewport_image,
             width: self.width,
             height: self.height,
@@ -165,7 +168,7 @@ impl Renderer {
     }
 
     fn set_scene(&mut self, json: &str) {
-        let _ = bevy_app::send(RenderCmd::SetScene {
+        let _ = device::send(RenderCmd::SetScene {
             json: json.to_string(),
         });
     }
@@ -173,7 +176,7 @@ impl Renderer {
     /// Raycast a viewport pixel; returns the hit editor id (blocking).
     fn pick(&mut self, x: f32, y: f32) -> Result<Option<String>, String> {
         let (reply_tx, reply_rx) = std::sync::mpsc::channel();
-        bevy_app::send(RenderCmd::Pick {
+        device::send(RenderCmd::Pick {
             image: self.viewport_image,
             x,
             y,
@@ -185,17 +188,17 @@ impl Renderer {
     }
 
     fn select_entity(&mut self, id: Option<String>) {
-        let _ = bevy_app::send(RenderCmd::SelectEntity { id });
+        let _ = device::send(RenderCmd::SelectEntity { id });
     }
 
     fn set_gizmo_mode(&mut self, mode: &str) {
-        let _ = bevy_app::send(RenderCmd::SetGizmoMode {
+        let _ = device::send(RenderCmd::SetGizmoMode {
             mode: mode.to_string(),
         });
     }
 
     fn camera_orbit(&mut self, dx: f32, dy: f32) {
-        let _ = bevy_app::send(RenderCmd::CameraOrbit {
+        let _ = device::send(RenderCmd::CameraOrbit {
             image: self.viewport_image,
             dx,
             dy,
@@ -203,7 +206,7 @@ impl Renderer {
     }
 
     fn camera_pan(&mut self, dx: f32, dy: f32) {
-        let _ = bevy_app::send(RenderCmd::CameraPan {
+        let _ = device::send(RenderCmd::CameraPan {
             image: self.viewport_image,
             dx,
             dy,
@@ -211,14 +214,14 @@ impl Renderer {
     }
 
     fn camera_zoom(&mut self, delta: f32) {
-        let _ = bevy_app::send(RenderCmd::CameraZoom {
+        let _ = device::send(RenderCmd::CameraZoom {
             image: self.viewport_image,
             delta,
         });
     }
 
     fn camera_look(&mut self, dx: f32, dy: f32) {
-        let _ = bevy_app::send(RenderCmd::CameraLook {
+        let _ = device::send(RenderCmd::CameraLook {
             image: self.viewport_image,
             dx,
             dy,
@@ -226,7 +229,7 @@ impl Renderer {
     }
 
     fn camera_fly(&mut self, forward: f32, right: f32, up: f32, dt: f32) {
-        let _ = bevy_app::send(RenderCmd::CameraFly {
+        let _ = device::send(RenderCmd::CameraFly {
             image: self.viewport_image,
             forward,
             right,
@@ -237,7 +240,7 @@ impl Renderer {
 
     fn drag_begin(&mut self, x: f32, y: f32) -> Result<bool, String> {
         let (reply_tx, reply_rx) = std::sync::mpsc::channel();
-        bevy_app::send(RenderCmd::DragBegin {
+        device::send(RenderCmd::DragBegin {
             image: self.viewport_image,
             x,
             y,
@@ -248,9 +251,9 @@ impl Renderer {
             .map_err(|_| "render thread dropped drag_begin reply".to_string())
     }
 
-    fn drag_update(&mut self, x: f32, y: f32) -> Result<Option<bevy_app::TransformOut>, String> {
+    fn drag_update(&mut self, x: f32, y: f32) -> Result<Option<render_thread::TransformOut>, String> {
         let (reply_tx, reply_rx) = std::sync::mpsc::channel();
-        bevy_app::send(RenderCmd::DragUpdate {
+        device::send(RenderCmd::DragUpdate {
             image: self.viewport_image,
             x,
             y,
@@ -262,11 +265,11 @@ impl Renderer {
     }
 
     fn drag_end(&mut self) {
-        let _ = bevy_app::send(RenderCmd::DragEnd);
+        let _ = device::send(RenderCmd::DragEnd);
     }
 
     fn set_hover(&mut self, x: f32, y: f32) {
-        let _ = bevy_app::send(RenderCmd::SetHover {
+        let _ = device::send(RenderCmd::SetHover {
             image: self.viewport_image,
             x,
             y,
@@ -281,7 +284,7 @@ impl Renderer {
             .and_then(|t| t.shared_texture().cloned());
 
         let (reply_tx, reply_rx) = std::sync::mpsc::channel();
-        bevy_app::send(RenderCmd::RenderFrame {
+        device::send(RenderCmd::RenderFrame {
             image: self.viewport_image,
             dst,
             width: self.width,
@@ -296,7 +299,7 @@ impl Renderer {
 
 impl Drop for Renderer {
     fn drop(&mut self) {
-        let _ = bevy_app::send(RenderCmd::DisposeViewport {
+        let _ = device::send(RenderCmd::DisposeViewport {
             image: self.viewport_image,
         });
     }
@@ -468,7 +471,7 @@ pub(crate) fn drag_update(
     handle: u64,
     x: f32,
     y: f32,
-) -> Result<Option<bevy_app::TransformOut>, String> {
+) -> Result<Option<render_thread::TransformOut>, String> {
     let renderer =
         lookup_renderer(handle).ok_or_else(|| "renderer handle not found".to_string())?;
     let result = renderer

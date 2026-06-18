@@ -11,7 +11,7 @@ use bevy::prelude::*;
 
 use super::hit::{gizmo_axis_at, ray_axis_param, GIZMO_LEN};
 use super::{DragState, GizmoAxis, GizmoHover, GizmoMode};
-use crate::bevy_app::TransformOut;
+use crate::engine::render_thread::TransformOut;
 use crate::picking::EditorSelection;
 
 pub(crate) fn drag_begin(sub_apps: &mut SubApps, image: AssetId<Image>, cursor: Vec2) -> bool {

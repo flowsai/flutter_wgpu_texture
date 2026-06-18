@@ -13,7 +13,7 @@ use bevy::render::render_resource::{PollType, TextureFormat};
 use bevy::render::texture::GpuImage;
 use bevy::render::RenderApp;
 
-use crate::bevy_app::shared_gpu;
+use crate::engine::device::shared_gpu;
 use crate::level;
 use camera::OrbitCamera;
 

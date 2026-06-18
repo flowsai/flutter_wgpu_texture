@@ -6,7 +6,7 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`
 
 RendererInfo createRenderer({
   required int width,
@@ -126,6 +126,26 @@ void cameraFly({
   up: up,
   dt: dt,
 );
+
+/// Begin a gizmo drag at a viewport pixel. Returns true if a handle was grabbed
+/// (the caller should then consume the drag rather than treating it as a pick).
+bool dragBegin({
+  required BigInt handle,
+  required double x,
+  required double y,
+}) => RustLib.instance.api.crateApiDragBegin(handle: handle, x: x, y: y);
+
+/// Continue a gizmo drag. Returns the selected entity's new transform (or null
+/// if nothing changed / no active drag).
+DragTransform? dragUpdate({
+  required BigInt handle,
+  required double x,
+  required double y,
+}) => RustLib.instance.api.crateApiDragUpdate(handle: handle, x: x, y: y);
+
+/// End the current gizmo drag.
+void dragEnd({required BigInt handle}) =>
+    RustLib.instance.api.crateApiDragEnd(handle: handle);
 
 BackendInfo getBackendInfo({required BigInt handle}) =>
     RustLib.instance.api.crateApiGetBackendInfo(handle: handle);
@@ -265,6 +285,31 @@ class DmaBufExport {
           fourcc == other.fourcc &&
           modifierLow == other.modifierLow &&
           modifierHigh == other.modifierHigh;
+}
+
+/// A transform returned to Dart after a gizmo drag (rotation is quat xyzw).
+class DragTransform {
+  final Float32List translation;
+  final Float32List rotation;
+  final Float32List scale;
+
+  const DragTransform({
+    required this.translation,
+    required this.rotation,
+    required this.scale,
+  });
+
+  @override
+  int get hashCode => translation.hashCode ^ rotation.hashCode ^ scale.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DragTransform &&
+          runtimeType == other.runtimeType &&
+          translation == other.translation &&
+          rotation == other.rotation &&
+          scale == other.scale;
 }
 
 class RendererInfo {

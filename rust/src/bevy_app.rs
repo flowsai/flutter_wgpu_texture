@@ -74,6 +74,52 @@ pub(crate) struct EditorSelection {
     pub(crate) mode: GizmoMode,
 }
 
+/// Which gizmo axis is grabbed during a drag.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GizmoAxis {
+    X,
+    Y,
+    Z,
+}
+
+impl GizmoAxis {
+    fn dir(self) -> Vec3 {
+        match self {
+            GizmoAxis::X => Vec3::X,
+            GizmoAxis::Y => Vec3::Y,
+            GizmoAxis::Z => Vec3::Z,
+        }
+    }
+}
+
+/// In-progress gizmo drag state (set on drag_begin, cleared on drag_end).
+#[derive(Resource, Default)]
+pub(crate) struct DragState {
+    pub(crate) active: bool,
+    pub(crate) axis: Option<GizmoAxis>,
+    pub(crate) start_cursor: Vec2,
+    pub(crate) start_transform: Transform,
+    /// World point on the grabbed axis line at drag start (for translate).
+    pub(crate) start_axis_point: Vec3,
+}
+
+/// Transform returned to Dart after a drag update so the inspector stays in sync.
+pub(crate) struct TransformOut {
+    pub(crate) translation: [f32; 3],
+    pub(crate) rotation: [f32; 4],
+    pub(crate) scale: [f32; 3],
+}
+
+impl TransformOut {
+    fn from_transform(t: &Transform) -> Self {
+        Self {
+            translation: t.translation.to_array(),
+            rotation: t.rotation.to_array(),
+            scale: t.scale.to_array(),
+        }
+    }
+}
+
 /// Orbit/pan/zoom camera state for the viewport (Unity-style navigation).
 /// `yaw`/`pitch` are spherical angles around `focus` at `distance`.
 #[derive(Resource)]
@@ -174,6 +220,22 @@ pub(crate) enum RenderCmd {
         up: f32,
         dt: f32,
     },
+    /// Begin a gizmo drag at a viewport pixel; reply true if a handle was grabbed.
+    DragBegin {
+        image: AssetId<Image>,
+        x: f32,
+        y: f32,
+        reply: Sender<bool>,
+    },
+    /// Continue a gizmo drag; reply with the selected entity's new transform.
+    DragUpdate {
+        image: AssetId<Image>,
+        x: f32,
+        y: f32,
+        reply: Sender<Option<TransformOut>>,
+    },
+    /// End the current gizmo drag.
+    DragEnd,
     /// Render one frame for `image` and copy the result into `dst`.
     RenderFrame {
         image: AssetId<Image>,
@@ -323,6 +385,19 @@ fn render_thread_main(ready_tx: Sender<Result<(), String>>) {
                 dt,
             } => {
                 camera_fly(&mut sub_apps, image, forward, right, up, dt);
+            }
+            RenderCmd::DragBegin { image, x, y, reply } => {
+                let grabbed = drag_begin(&mut sub_apps, image, Vec2::new(x, y));
+                let _ = reply.send(grabbed);
+            }
+            RenderCmd::DragUpdate { image, x, y, reply } => {
+                let out = drag_update(&mut sub_apps, image, Vec2::new(x, y));
+                let _ = reply.send(out);
+            }
+            RenderCmd::DragEnd => {
+                let world = sub_apps.main.world_mut();
+                world.init_resource::<DragState>();
+                world.resource_mut::<DragState>().active = false;
             }
             RenderCmd::RenderFrame {
                 image,
@@ -886,6 +961,187 @@ fn draw_mode_gizmos(gizmos: &mut Gizmos, xf: &GlobalTransform, mode: GizmoMode) 
             }
         }
     }
+}
+
+// ── Draggable transform gizmos ────────────────────────────────────────────────
+
+const GIZMO_LEN: f32 = 1.0;
+const HANDLE_PIXEL_THRESHOLD: f32 = 14.0;
+
+/// 2D distance from point `p` to segment `a`–`b`.
+fn point_segment_dist(p: Vec2, a: Vec2, b: Vec2) -> f32 {
+    let ab = b - a;
+    let len_sq = ab.length_squared();
+    if len_sq < 1e-6 {
+        return p.distance(a);
+    }
+    let t = ((p - a).dot(ab) / len_sq).clamp(0.0, 1.0);
+    p.distance(a + ab * t)
+}
+
+/// Closest point on the axis line `origin + s*dir` to the cursor ray.
+/// Returns the world point on the axis. `None` if ray ~parallel to axis.
+fn closest_axis_point(ray: Ray3d, origin: Vec3, dir: Vec3) -> Option<Vec3> {
+    let rd = *ray.direction;
+    let w0 = ray.origin - origin;
+    let a = dir.dot(dir);
+    let b = dir.dot(rd);
+    let c = rd.dot(rd);
+    let d = dir.dot(w0);
+    let e = rd.dot(w0);
+    let denom = a * c - b * b;
+    if denom.abs() < 1e-6 {
+        return None;
+    }
+    let s = (b * e - c * d) / denom;
+    Some(origin + dir * s)
+}
+
+fn drag_begin(sub_apps: &mut SubApps, image: AssetId<Image>, cursor: Vec2) -> bool {
+    let world = sub_apps.main.world_mut();
+    world.init_resource::<DragState>();
+    world
+        .run_system_once_with(drag_begin_system, (image, cursor))
+        .unwrap_or(false)
+}
+
+fn drag_begin_system(
+    input: In<(AssetId<Image>, Vec2)>,
+    cameras: Query<(&Camera, &GlobalTransform, &RenderTarget)>,
+    transforms: Query<&GlobalTransform>,
+    selection: Res<EditorSelection>,
+    mut drag: ResMut<DragState>,
+) -> bool {
+    let (image, cursor) = input.0;
+    let Some(entity) = selection.selected else {
+        return false;
+    };
+    if selection.mode == GizmoMode::None {
+        return false;
+    }
+    let Ok(obj_xf) = transforms.get(entity) else {
+        return false;
+    };
+    let Some((cam, cam_xf, _)) = cameras
+        .iter()
+        .find(|(_, _, rt)| matches!(rt, RenderTarget::Image(h) if h.handle.id() == image))
+    else {
+        return false;
+    };
+
+    let origin = obj_xf.translation();
+    // Hit-test each axis handle in screen space; pick the nearest within threshold.
+    let mut best: Option<(GizmoAxis, f32)> = None;
+    for axis in [GizmoAxis::X, GizmoAxis::Y, GizmoAxis::Z] {
+        let end = origin + axis.dir() * GIZMO_LEN;
+        let (Ok(a), Ok(b)) = (
+            cam.world_to_viewport(cam_xf, origin),
+            cam.world_to_viewport(cam_xf, end),
+        ) else {
+            continue;
+        };
+        let dist = point_segment_dist(cursor, a, b);
+        if dist < HANDLE_PIXEL_THRESHOLD && best.map_or(true, |(_, bd)| dist < bd) {
+            best = Some((axis, dist));
+        }
+    }
+
+    let Some((axis, _)) = best else {
+        return false;
+    };
+
+    let start_axis_point = cam
+        .viewport_to_world(cam_xf, cursor)
+        .ok()
+        .and_then(|ray| closest_axis_point(ray, origin, axis.dir()))
+        .unwrap_or(origin);
+
+    drag.active = true;
+    drag.axis = Some(axis);
+    drag.start_cursor = cursor;
+    drag.start_transform = obj_xf.compute_transform();
+    drag.start_axis_point = start_axis_point;
+    true
+}
+
+fn drag_update(
+    sub_apps: &mut SubApps,
+    image: AssetId<Image>,
+    cursor: Vec2,
+) -> Option<TransformOut> {
+    let world = sub_apps.main.world_mut();
+    world
+        .run_system_once_with(drag_update_system, (image, cursor))
+        .ok()
+        .flatten()
+}
+
+fn drag_update_system(
+    input: In<(AssetId<Image>, Vec2)>,
+    cameras: Query<(&Camera, &GlobalTransform, &RenderTarget)>,
+    mut transforms: Query<&mut Transform>,
+    selection: Res<EditorSelection>,
+    drag: Res<DragState>,
+) -> Option<TransformOut> {
+    if !drag.active {
+        return None;
+    }
+    let (image, cursor) = input.0;
+    let entity = selection.selected?;
+    let axis = drag.axis?;
+    let (cam, cam_xf, _) = cameras
+        .iter()
+        .find(|(_, _, rt)| matches!(rt, RenderTarget::Image(h) if h.handle.id() == image))?;
+
+    let axis_dir = axis.dir();
+    let start = &drag.start_transform;
+    let mut new_t = *start;
+
+    match selection.mode {
+        GizmoMode::Translate => {
+            let ray = cam.viewport_to_world(cam_xf, cursor).ok()?;
+            let now = closest_axis_point(ray, start.translation, axis_dir)?;
+            let delta = (now - drag.start_axis_point).dot(axis_dir);
+            new_t.translation = start.translation + axis_dir * delta;
+        }
+        GizmoMode::Rotate => {
+            // Angle delta from cursor swing around the projected object center.
+            let center = cam.world_to_viewport(cam_xf, start.translation).ok()?;
+            let a0 = drag.start_cursor - center;
+            let a1 = cursor - center;
+            if a0.length_squared() < 1.0 || a1.length_squared() < 1.0 {
+                return None;
+            }
+            let mut angle = a1.y.atan2(a1.x) - a0.y.atan2(a0.x);
+            // Flip sign when the axis points away from the camera.
+            let cam_fwd = cam_xf.forward();
+            if axis_dir.dot(*cam_fwd) > 0.0 {
+                angle = -angle;
+            }
+            new_t.rotation = Quat::from_axis_angle(axis_dir, angle) * start.rotation;
+        }
+        GizmoMode::Scale => {
+            let p0 = cam.world_to_viewport(cam_xf, start.translation).ok()?;
+            let p1 = cam
+                .world_to_viewport(cam_xf, start.translation + axis_dir * GIZMO_LEN)
+                .ok()?;
+            let axis2d = (p1 - p0).normalize_or_zero();
+            let signed = (cursor - drag.start_cursor).dot(axis2d);
+            let factor = (1.0 + signed * 0.01).max(0.05);
+            let mut scale = start.scale;
+            match axis {
+                GizmoAxis::X => scale.x *= factor,
+                GizmoAxis::Y => scale.y *= factor,
+                GizmoAxis::Z => scale.z *= factor,
+            }
+            new_t.scale = scale;
+        }
+        GizmoMode::None => return None,
+    }
+
+    let mut t = transforms.get_mut(entity).ok()?;
+    *t = new_t;
+    Some(TransformOut::from_transform(&new_t))
 }
 
 fn render_one_frame(

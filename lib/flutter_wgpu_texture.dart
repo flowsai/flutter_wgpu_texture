@@ -17,4 +17,8 @@ export 'src/rust/api.dart'
         cameraPan,
         cameraZoom,
         cameraLook,
-        cameraFly;
+        cameraFly,
+        dragBegin,
+        dragUpdate,
+        dragEnd,
+        DragTransform;

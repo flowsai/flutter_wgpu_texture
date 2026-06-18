@@ -31,7 +31,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   DmaBufExport dco_decode_box_autoadd_dma_buf_export(dynamic raw);
 
   @protected
+  DragTransform dco_decode_box_autoadd_drag_transform(dynamic raw);
+
+  @protected
   DmaBufExport dco_decode_dma_buf_export(dynamic raw);
+
+  @protected
+  DragTransform dco_decode_drag_transform(dynamic raw);
 
   @protected
   double dco_decode_f_32(dynamic raw);
@@ -53,6 +59,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   DmaBufExport? dco_decode_opt_box_autoadd_dma_buf_export(dynamic raw);
+
+  @protected
+  DragTransform? dco_decode_opt_box_autoadd_drag_transform(dynamic raw);
 
   @protected
   RendererInfo dco_decode_renderer_info(dynamic raw);
@@ -87,7 +96,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  DragTransform sse_decode_box_autoadd_drag_transform(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   DmaBufExport sse_decode_dma_buf_export(SseDeserializer deserializer);
+
+  @protected
+  DragTransform sse_decode_drag_transform(SseDeserializer deserializer);
 
   @protected
   double sse_decode_f_32(SseDeserializer deserializer);
@@ -109,6 +126,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   DmaBufExport? sse_decode_opt_box_autoadd_dma_buf_export(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  DragTransform? sse_decode_opt_box_autoadd_drag_transform(
     SseDeserializer deserializer,
   );
 
@@ -146,7 +168,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_drag_transform(
+    DragTransform self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_dma_buf_export(DmaBufExport self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_drag_transform(DragTransform self, SseSerializer serializer);
 
   @protected
   void sse_encode_f_32(double self, SseSerializer serializer);
@@ -178,6 +209,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_dma_buf_export(
     DmaBufExport? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_drag_transform(
+    DragTransform? self,
     SseSerializer serializer,
   );
 

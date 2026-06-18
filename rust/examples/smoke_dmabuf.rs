@@ -77,6 +77,14 @@ fn main() {
         api::camera_pan(handle, 5.0, 5.0).expect("camera_pan");
         api::camera_zoom(handle, -50.0).expect("camera_zoom");
         api::camera_fly(handle, 1.0, 0.0, 0.0, 0.016).expect("camera_fly");
+        // Exercise gizmo drag (must not panic; grabbing may or may not hit a handle).
+        let cx = (w / 2) as f32;
+        let cy = (h / 2) as f32;
+        let grabbed = api::drag_begin(handle, cx, cy).expect("drag_begin");
+        println!("[smoke] drag_begin grabbed = {grabbed}");
+        let moved = api::drag_update(handle, cx + 30.0, cy).expect("drag_update");
+        println!("[smoke] drag_update -> {:?}", moved.map(|t| t.translation));
+        api::drag_end(handle).expect("drag_end");
         // Render a couple frames so gizmos draw.
         for _ in 0..2 {
             api::request_frame(handle).expect("request_frame");

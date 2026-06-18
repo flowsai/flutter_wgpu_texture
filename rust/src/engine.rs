@@ -235,6 +235,36 @@ impl Renderer {
         });
     }
 
+    fn drag_begin(&mut self, x: f32, y: f32) -> Result<bool, String> {
+        let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+        bevy_app::send(RenderCmd::DragBegin {
+            image: self.viewport_image,
+            x,
+            y,
+            reply: reply_tx,
+        })?;
+        reply_rx
+            .recv()
+            .map_err(|_| "render thread dropped drag_begin reply".to_string())
+    }
+
+    fn drag_update(&mut self, x: f32, y: f32) -> Result<Option<bevy_app::TransformOut>, String> {
+        let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+        bevy_app::send(RenderCmd::DragUpdate {
+            image: self.viewport_image,
+            x,
+            y,
+            reply: reply_tx,
+        })?;
+        reply_rx
+            .recv()
+            .map_err(|_| "render thread dropped drag_update reply".to_string())
+    }
+
+    fn drag_end(&mut self) {
+        let _ = bevy_app::send(RenderCmd::DragEnd);
+    }
+
     /// Render one frame and copy it into the present target's shared texture.
     fn render(&mut self) -> Result<bool, String> {
         let dst = self
@@ -415,6 +445,40 @@ camera_fn!(camera_pan, camera_pan, dx: f32, dy: f32);
 camera_fn!(camera_zoom, camera_zoom, delta: f32);
 camera_fn!(camera_look, camera_look, dx: f32, dy: f32);
 camera_fn!(camera_fly, camera_fly, forward: f32, right: f32, up: f32, dt: f32);
+
+pub(crate) fn drag_begin(handle: u64, x: f32, y: f32) -> Result<bool, String> {
+    let renderer =
+        lookup_renderer(handle).ok_or_else(|| "renderer handle not found".to_string())?;
+    let result = renderer
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .drag_begin(x, y);
+    result
+}
+
+pub(crate) fn drag_update(
+    handle: u64,
+    x: f32,
+    y: f32,
+) -> Result<Option<bevy_app::TransformOut>, String> {
+    let renderer =
+        lookup_renderer(handle).ok_or_else(|| "renderer handle not found".to_string())?;
+    let result = renderer
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .drag_update(x, y);
+    result
+}
+
+pub(crate) fn drag_end(handle: u64) -> Result<(), String> {
+    let renderer =
+        lookup_renderer(handle).ok_or_else(|| "renderer handle not found".to_string())?;
+    renderer
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .drag_end();
+    Ok(())
+}
 
 pub(crate) fn resize_renderer(handle: u64, width: u32, height: u32) -> Result<(), String> {
     let renderer =

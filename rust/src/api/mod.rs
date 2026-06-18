@@ -137,6 +137,42 @@ pub fn camera_fly(handle: u64, forward: f32, right: f32, up: f32, dt: f32) -> Re
     engine::camera_fly(handle, forward, right, up, dt)
 }
 
+// ── Draggable transform gizmos ────────────────────────────────────────────────
+
+/// A transform returned to Dart after a gizmo drag (rotation is quat xyzw).
+#[derive(Clone, Debug)]
+pub struct DragTransform {
+    pub translation: Vec<f32>,
+    pub rotation: Vec<f32>,
+    pub scale: Vec<f32>,
+}
+
+/// Begin a gizmo drag at a viewport pixel. Returns true if a handle was grabbed
+/// (the caller should then consume the drag rather than treating it as a pick).
+#[frb(sync)]
+pub fn drag_begin(handle: u64, x: f32, y: f32) -> Result<bool, String> {
+    engine::drag_begin(handle, x, y)
+}
+
+/// Continue a gizmo drag. Returns the selected entity's new transform (or null
+/// if nothing changed / no active drag).
+#[frb(sync)]
+pub fn drag_update(handle: u64, x: f32, y: f32) -> Result<Option<DragTransform>, String> {
+    engine::drag_update(handle, x, y).map(|opt| {
+        opt.map(|t| DragTransform {
+            translation: t.translation.to_vec(),
+            rotation: t.rotation.to_vec(),
+            scale: t.scale.to_vec(),
+        })
+    })
+}
+
+/// End the current gizmo drag.
+#[frb(sync)]
+pub fn drag_end(handle: u64) -> Result<(), String> {
+    engine::drag_end(handle)
+}
+
 #[frb(sync)]
 pub fn get_backend_info(handle: u64) -> Result<BackendInfo, String> {
     engine::renderer_backend_info(handle)

@@ -973,6 +973,23 @@ fn point_segment_dist(p: Vec2, a: Vec2, b: Vec2) -> f32 {
     p.distance(a + ab * t)
 }
 
+/// Signed distance `s` along the axis line `origin + s*dir` of the point closest
+/// to the cursor `ray`. `None` if the ray is ~parallel to the axis.
+fn ray_axis_param(ray: Ray3d, origin: Vec3, dir: Vec3) -> Option<f32> {
+    let rd = *ray.direction;
+    let w0 = ray.origin - origin;
+    let a = dir.dot(dir);
+    let b = dir.dot(rd);
+    let c = rd.dot(rd);
+    let d = dir.dot(w0);
+    let e = rd.dot(w0);
+    let denom = a * c - b * b;
+    if denom.abs() < 1e-6 {
+        return None;
+    }
+    Some((b * e - c * d) / denom)
+}
+
 fn drag_begin(sub_apps: &mut SubApps, image: AssetId<Image>, cursor: Vec2) -> bool {
     let world = sub_apps.main.world_mut();
     world.init_resource::<DragState>();
@@ -1121,37 +1138,52 @@ fn drag_update_system(
     let axis2d = (axis_end2d - origin2d).normalize_or_zero();
     let cursor_delta = cursor - drag.start_cursor;
 
+    // Signed world distance the object should move along its axis: intersect the
+    // cursor ray with the plane through the object containing the axis and most
+    // facing the camera, then take the component along the axis. This is
+    // geometrically exact and sign-correct for every axis and camera angle.
+    let along_axis = {
+        let ray0 = cam.viewport_to_world(cam_xf, drag.start_cursor);
+        let ray1 = cam.viewport_to_world(cam_xf, cursor);
+        match (ray0, ray1) {
+            (Ok(r0), Ok(r1)) => {
+                let p0 = ray_axis_param(r0, start.translation, axis_dir);
+                let p1 = ray_axis_param(r1, start.translation, axis_dir);
+                match (p0, p1) {
+                    (Some(a), Some(b)) => b - a,
+                    _ => cursor_delta.dot(axis2d) / (axis_end2d - origin2d).length().max(1.0),
+                }
+            }
+            _ => cursor_delta.dot(axis2d) / (axis_end2d - origin2d).length().max(1.0),
+        }
+    };
+
     match selection.mode {
         GizmoMode::Translate => {
-            // Move along the axis by how far the cursor dragged in the handle's
-            // ON-SCREEN direction, converted to world units via the projected
-            // length of one world unit of the axis. This makes "drag the arrow
-            // the way it points" always move along +axis (intuitive, no inversion).
-            let axis_px_per_unit = (axis_end2d - origin2d).length().max(1.0);
-            let drag_px = cursor_delta.dot(axis2d);
-            let world_delta = drag_px / axis_px_per_unit * GIZMO_LEN;
-            new_t.translation = start.translation + axis_dir * world_delta;
+            new_t.translation = start.translation + axis_dir * along_axis;
         }
         GizmoMode::Rotate => {
-            // Signed angle swept by the cursor around the projected center.
-            // Vec2::angle_to gives a CCW angle in screen space (Y-down), so a
-            // positive screen angle is CW visually — negate for intuitive feel.
+            // Screen swing angle of the cursor around the projected center.
             let a0 = drag.start_cursor - origin2d;
             let a1 = cursor - origin2d;
             if a0.length_squared() < 4.0 || a1.length_squared() < 4.0 {
                 return None;
             }
-            let screen_angle = a0.angle_to(a1); // CCW-positive in math space
-            // Axis facing the camera (dot with forward < 0) rotates the same
-            // visual direction as the screen swing; facing away flips it.
-            let facing = -axis_dir.dot(*cam_xf.forward());
-            let angle = screen_angle * facing.signum();
+            // `perp_dot` > 0 ⇒ CCW in screen (Y-down) space, which is CW visually.
+            let screen_angle = a0.angle_to(a1);
+            // The world axis projects to a screen normal; whether a CW screen
+            // swing corresponds to +rotation about the axis depends on whether
+            // the axis points toward or away from the camera. Use the axis's
+            // depth direction relative to the camera->object view ray.
+            let view_dir = (start.translation - cam_xf.translation()).normalize_or_zero();
+            let toward_camera = axis_dir.dot(view_dir); // >0 ⇒ axis points away from camera
+            let angle = screen_angle * toward_camera.signum();
             new_t.rotation = (start.rotation * Quat::from_axis_angle(axis_dir, angle)).normalize();
         }
         GizmoMode::Scale => {
-            // Drag along the axis's screen direction = grow; opposite = shrink.
-            let signed = cursor_delta.dot(axis2d);
-            let factor = (1.0 + signed * 0.01).max(0.05);
+            // Same signed on-screen amount as translate → grow when dragging the
+            // handle the way it points, shrink the other way (per-axis correct).
+            let factor = (1.0 + along_axis).max(0.05);
             let mut scale = start.scale;
             match axis {
                 GizmoAxis::X => scale.x *= factor,

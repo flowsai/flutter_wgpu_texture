@@ -72,6 +72,11 @@ fn main() {
         println!("[smoke] pick hit = {hit:?}");
         api::select_entity(handle, hit.clone()).expect("select_entity");
         api::set_gizmo_mode(handle, "translate".to_string()).expect("set_gizmo_mode");
+        // Exercise camera nav (must not panic).
+        api::camera_orbit(handle, 20.0, 10.0).expect("camera_orbit");
+        api::camera_pan(handle, 5.0, 5.0).expect("camera_pan");
+        api::camera_zoom(handle, -50.0).expect("camera_zoom");
+        api::camera_fly(handle, 1.0, 0.0, 0.0, 0.016).expect("camera_fly");
         // Render a couple frames so gizmos draw.
         for _ in 0..2 {
             api::request_frame(handle).expect("request_frame");

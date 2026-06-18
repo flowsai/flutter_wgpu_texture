@@ -38,7 +38,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.12.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1770169427;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -853050254;
 
 // Section: executor
 
@@ -81,6 +81,168 @@ fn wire__crate__api__attach_metal_texture_impl(
                     api_height,
                     api_bytes_per_row,
                 )?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
+fn wire__crate__api__camera_fly_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "camera_fly",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_handle = <u64>::sse_decode(&mut deserializer);
+            let api_forward = <f32>::sse_decode(&mut deserializer);
+            let api_right = <f32>::sse_decode(&mut deserializer);
+            let api_up = <f32>::sse_decode(&mut deserializer);
+            let api_dt = <f32>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, String>((move || {
+                let output_ok =
+                    crate::api::camera_fly(api_handle, api_forward, api_right, api_up, api_dt)?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
+fn wire__crate__api__camera_look_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "camera_look",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_handle = <u64>::sse_decode(&mut deserializer);
+            let api_dx = <f32>::sse_decode(&mut deserializer);
+            let api_dy = <f32>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, String>((move || {
+                let output_ok = crate::api::camera_look(api_handle, api_dx, api_dy)?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
+fn wire__crate__api__camera_orbit_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "camera_orbit",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_handle = <u64>::sse_decode(&mut deserializer);
+            let api_dx = <f32>::sse_decode(&mut deserializer);
+            let api_dy = <f32>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, String>((move || {
+                let output_ok = crate::api::camera_orbit(api_handle, api_dx, api_dy)?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
+fn wire__crate__api__camera_pan_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "camera_pan",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_handle = <u64>::sse_decode(&mut deserializer);
+            let api_dx = <f32>::sse_decode(&mut deserializer);
+            let api_dy = <f32>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, String>((move || {
+                let output_ok = crate::api::camera_pan(api_handle, api_dx, api_dy)?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
+fn wire__crate__api__camera_zoom_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "camera_zoom",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_handle = <u64>::sse_decode(&mut deserializer);
+            let api_delta = <f32>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, String>((move || {
+                let output_ok = crate::api::camera_zoom(api_handle, api_delta)?;
                 Ok(output_ok)
             })())
         },
@@ -854,7 +1016,7 @@ fn pde_ffi_dispatcher_primary_impl(
 ) {
     // Codec=Pde (Serialization + dispatch), see doc to use other codecs
     match func_id {
-        11 => wire__crate__api__request_frame_impl(port, ptr, rust_vec_len, data_len),
+        16 => wire__crate__api__request_frame_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -868,24 +1030,29 @@ fn pde_ffi_dispatcher_sync_impl(
     // Codec=Pde (Serialization + dispatch), see doc to use other codecs
     match func_id {
         1 => wire__crate__api__attach_metal_texture_impl(ptr, rust_vec_len, data_len),
-        2 => wire__crate__api__create_dxgi_surface_impl(ptr, rust_vec_len, data_len),
-        3 => wire__crate__api__create_renderer_impl(ptr, rust_vec_len, data_len),
-        4 => wire__crate__api__dispose_renderer_impl(ptr, rust_vec_len, data_len),
-        5 => wire__crate__api__ensure_linux_present_impl(ptr, rust_vec_len, data_len),
-        6 => wire__crate__api__export_dmabuf_impl(ptr, rust_vec_len, data_len),
-        7 => wire__crate__api__get_backend_info_impl(ptr, rust_vec_len, data_len),
-        8 => wire__crate__api__invoke_command_impl(ptr, rust_vec_len, data_len),
-        9 => wire__crate__api__linux_dmabuf_supported_impl(ptr, rust_vec_len, data_len),
-        10 => wire__crate__api__pick_impl(ptr, rust_vec_len, data_len),
-        12 => wire__crate__api__resize_renderer_impl(ptr, rust_vec_len, data_len),
-        13 => wire__crate__api__select_entity_impl(ptr, rust_vec_len, data_len),
-        14 => wire__crate__api__set_bool_param_impl(ptr, rust_vec_len, data_len),
-        15 => wire__crate__api__set_float_param_impl(ptr, rust_vec_len, data_len),
-        16 => wire__crate__api__set_gizmo_mode_impl(ptr, rust_vec_len, data_len),
-        17 => wire__crate__api__set_scene_impl(ptr, rust_vec_len, data_len),
-        18 => wire__crate__api__set_vec4_param_impl(ptr, rust_vec_len, data_len),
-        19 => wire__crate__api__start_animation_impl(ptr, rust_vec_len, data_len),
-        20 => wire__crate__api__stop_animation_impl(ptr, rust_vec_len, data_len),
+        2 => wire__crate__api__camera_fly_impl(ptr, rust_vec_len, data_len),
+        3 => wire__crate__api__camera_look_impl(ptr, rust_vec_len, data_len),
+        4 => wire__crate__api__camera_orbit_impl(ptr, rust_vec_len, data_len),
+        5 => wire__crate__api__camera_pan_impl(ptr, rust_vec_len, data_len),
+        6 => wire__crate__api__camera_zoom_impl(ptr, rust_vec_len, data_len),
+        7 => wire__crate__api__create_dxgi_surface_impl(ptr, rust_vec_len, data_len),
+        8 => wire__crate__api__create_renderer_impl(ptr, rust_vec_len, data_len),
+        9 => wire__crate__api__dispose_renderer_impl(ptr, rust_vec_len, data_len),
+        10 => wire__crate__api__ensure_linux_present_impl(ptr, rust_vec_len, data_len),
+        11 => wire__crate__api__export_dmabuf_impl(ptr, rust_vec_len, data_len),
+        12 => wire__crate__api__get_backend_info_impl(ptr, rust_vec_len, data_len),
+        13 => wire__crate__api__invoke_command_impl(ptr, rust_vec_len, data_len),
+        14 => wire__crate__api__linux_dmabuf_supported_impl(ptr, rust_vec_len, data_len),
+        15 => wire__crate__api__pick_impl(ptr, rust_vec_len, data_len),
+        17 => wire__crate__api__resize_renderer_impl(ptr, rust_vec_len, data_len),
+        18 => wire__crate__api__select_entity_impl(ptr, rust_vec_len, data_len),
+        19 => wire__crate__api__set_bool_param_impl(ptr, rust_vec_len, data_len),
+        20 => wire__crate__api__set_float_param_impl(ptr, rust_vec_len, data_len),
+        21 => wire__crate__api__set_gizmo_mode_impl(ptr, rust_vec_len, data_len),
+        22 => wire__crate__api__set_scene_impl(ptr, rust_vec_len, data_len),
+        23 => wire__crate__api__set_vec4_param_impl(ptr, rust_vec_len, data_len),
+        24 => wire__crate__api__start_animation_impl(ptr, rust_vec_len, data_len),
+        25 => wire__crate__api__stop_animation_impl(ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }

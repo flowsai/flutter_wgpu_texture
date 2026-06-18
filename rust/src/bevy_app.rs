@@ -74,6 +74,43 @@ pub(crate) struct EditorSelection {
     pub(crate) mode: GizmoMode,
 }
 
+/// Orbit/pan/zoom camera state for the viewport (Unity-style navigation).
+/// `yaw`/`pitch` are spherical angles around `focus` at `distance`.
+#[derive(Resource)]
+pub(crate) struct OrbitCamera {
+    pub(crate) focus: Vec3,
+    pub(crate) yaw: f32,
+    pub(crate) pitch: f32,
+    pub(crate) distance: f32,
+}
+
+impl Default for OrbitCamera {
+    fn default() -> Self {
+        // Frame the default scene from roughly (3,3,6) looking at origin.
+        Self {
+            focus: Vec3::ZERO,
+            yaw: 0.46,    // ~26° around Y
+            pitch: 0.42,  // ~24° above horizon
+            distance: 7.3,
+        }
+    }
+}
+
+impl OrbitCamera {
+    /// Camera world position from the spherical orbit parameters.
+    fn position(&self) -> Vec3 {
+        let (sy, cy) = self.yaw.sin_cos();
+        let (sp, cp) = self.pitch.sin_cos();
+        self.focus + Vec3::new(self.distance * cp * sy, self.distance * sp, self.distance * cp * cy)
+    }
+
+    fn transform(&self) -> Transform {
+        Transform::from_translation(self.position()).looking_at(self.focus, Vec3::Y)
+    }
+}
+
+const PITCH_LIMIT: f32 = std::f32::consts::FRAC_PI_2 - 0.05;
+
 /// Format of the offscreen render target. MUST match the wgpu format of the
 /// package's DMA-BUF `shared_texture` (Bgra8Unorm) for copy_texture_to_texture.
 const TARGET_FORMAT: TextureFormat = TextureFormat::Bgra8Unorm;
@@ -121,6 +158,22 @@ pub(crate) enum RenderCmd {
     SelectEntity { id: Option<String> },
     /// Set the active transform gizmo mode ("translate"|"rotate"|"scale"|"none").
     SetGizmoMode { mode: String },
+    /// Orbit the camera around its focus (Alt+LMB drag). dx/dy = pixel deltas.
+    CameraOrbit { image: AssetId<Image>, dx: f32, dy: f32 },
+    /// Pan the camera focus in the view plane (MMB drag).
+    CameraPan { image: AssetId<Image>, dx: f32, dy: f32 },
+    /// Zoom toward/away from focus (scroll). delta = scroll units.
+    CameraZoom { image: AssetId<Image>, delta: f32 },
+    /// Free-look: rotate in place (RMB drag), keeping focus ahead of the camera.
+    CameraLook { image: AssetId<Image>, dx: f32, dy: f32 },
+    /// Fly: move along camera basis (RMB + WASD). f/r/u in [-1,1], dt in seconds.
+    CameraFly {
+        image: AssetId<Image>,
+        forward: f32,
+        right: f32,
+        up: f32,
+        dt: f32,
+    },
     /// Render one frame for `image` and copy the result into `dst`.
     RenderFrame {
         image: AssetId<Image>,
@@ -250,6 +303,27 @@ fn render_thread_main(ready_tx: Sender<Result<(), String>>) {
                 world.init_resource::<EditorSelection>();
                 world.resource_mut::<EditorSelection>().mode = GizmoMode::from_str(&mode);
             }
+            RenderCmd::CameraOrbit { image, dx, dy } => {
+                camera_orbit(&mut sub_apps, image, dx, dy);
+            }
+            RenderCmd::CameraPan { image, dx, dy } => {
+                camera_pan(&mut sub_apps, image, dx, dy);
+            }
+            RenderCmd::CameraZoom { image, delta } => {
+                camera_zoom(&mut sub_apps, image, delta);
+            }
+            RenderCmd::CameraLook { image, dx, dy } => {
+                camera_look(&mut sub_apps, image, dx, dy);
+            }
+            RenderCmd::CameraFly {
+                image,
+                forward,
+                right,
+                up,
+                dt,
+            } => {
+                camera_fly(&mut sub_apps, image, forward, right, up, dt);
+            }
             RenderCmd::RenderFrame {
                 image,
                 dst,
@@ -319,6 +393,13 @@ fn build_app() -> Result<(SubApps, SharedGpu), String> {
     app.init_resource::<EditorSelection>();
     app.add_systems(Update, draw_editor_gizmos);
 
+    // Ambient light so faces not facing the directional light aren't pure black.
+    app.insert_resource(bevy::light::GlobalAmbientLight {
+        color: Color::WHITE,
+        brightness: 200.0,
+        ..default()
+    });
+
     // Drive plugin build to completion (async device creation finishes here).
     while app.plugins_state() == PluginsState::Adding {
         bevy::tasks::tick_global_task_pools_on_main_thread();
@@ -334,6 +415,9 @@ fn build_app() -> Result<(SubApps, SharedGpu), String> {
         config.depth_bias = -1.0;
         config.line.width = 2.5;
     }
+
+    // Orbit camera state for the viewport (one viewport in v1).
+    app.world_mut().init_resource::<OrbitCamera>();
 
     // Extract the shared device/queue/adapter info from the built app.
     let world = app.world();
@@ -369,11 +453,13 @@ fn spawn_viewport(sub_apps: &mut SubApps, width: u32, height: u32) -> (AssetId<I
     let handle = world.resource_mut::<Assets<Image>>().add(img);
     let image_id = handle.id();
     // In this Bevy, RenderTarget is its own component (not Camera.target).
+    world.init_resource::<OrbitCamera>();
+    let cam_xf = world.resource::<OrbitCamera>().transform();
     let camera = world
         .spawn((
             Camera3d::default(),
             RenderTarget::Image(handle.into()),
-            Transform::from_xyz(3.0, 3.0, 6.0).looking_at(Vec3::ZERO, Vec3::Y),
+            cam_xf,
         ))
         .id();
     (image_id, camera)
@@ -482,7 +568,7 @@ fn spawn_entity(world: &mut World, def: &SceneEntityDef) -> Entity {
                         shadow_maps_enabled: true,
                         ..default()
                     },
-                    transform,
+                    light_transform(&transform),
                 ))
                 .id()
         }
@@ -493,10 +579,29 @@ fn spawn_entity(world: &mut World, def: &SceneEntityDef) -> Entity {
     }
 }
 
+/// A `DirectionalLight` shines along its local -Z (rotation), not its position.
+/// If the editor gives an (almost) identity rotation, aim it into the scene from
+/// above so multiple faces are lit; otherwise honor the editor's rotation.
+fn light_transform(transform: &Transform) -> Transform {
+    const DEFAULT_DIR: Vec3 = Vec3::new(-1.0, -2.0, -1.0);
+    if transform.rotation.abs_diff_eq(Quat::IDENTITY, 1e-4) {
+        Transform::from_translation(transform.translation)
+            .looking_to(DEFAULT_DIR.normalize(), Vec3::Y)
+    } else {
+        *transform
+    }
+}
+
 /// Patch an existing entity's transform and (for meshes) material color.
 fn update_entity(world: &mut World, entity: Entity, def: &SceneEntityDef) {
+    let is_light = world.get::<DirectionalLight>(entity).is_some();
     if let Some(mut t) = world.get_mut::<Transform>(entity) {
-        *t = def.transform.to_bevy();
+        let new_t = def.transform.to_bevy();
+        *t = if is_light {
+            light_transform(&new_t)
+        } else {
+            new_t
+        };
     }
 
     if let (Some(mat_def), Some(handle)) = (
@@ -600,6 +705,113 @@ fn set_selection(sub_apps: &mut SubApps, id: Option<String>) {
         .as_ref()
         .and_then(|id| world.resource::<EditorIdMap>().fwd.get(id).copied());
     world.resource_mut::<EditorSelection>().selected = entity;
+}
+
+// ── Camera navigation (Unity-style; driven by Flutter-fed deltas) ─────────────
+
+/// Find the camera entity rendering to `image`.
+fn camera_for_image(world: &mut World, image: AssetId<Image>) -> Option<Entity> {
+    let mut q = world.query::<(Entity, &RenderTarget)>();
+    q.iter(world)
+        .find(|(_, rt)| matches!(rt, RenderTarget::Image(h) if h.handle.id() == image))
+        .map(|(e, _)| e)
+}
+
+/// Write the orbit camera's transform onto the camera entity.
+fn apply_orbit_camera(world: &mut World, camera: Entity) {
+    let orbit = world.resource::<OrbitCamera>();
+    let new_xf = orbit.transform();
+    if let Some(mut t) = world.get_mut::<Transform>(camera) {
+        *t = new_xf;
+    }
+}
+
+fn camera_orbit(sub_apps: &mut SubApps, image: AssetId<Image>, dx: f32, dy: f32) {
+    let world = sub_apps.main.world_mut();
+    let Some(camera) = camera_for_image(world, image) else {
+        return;
+    };
+    {
+        let mut orbit = world.resource_mut::<OrbitCamera>();
+        orbit.yaw -= dx * 0.008;
+        orbit.pitch = (orbit.pitch + dy * 0.008).clamp(-PITCH_LIMIT, PITCH_LIMIT);
+    }
+    apply_orbit_camera(world, camera);
+}
+
+fn camera_pan(sub_apps: &mut SubApps, image: AssetId<Image>, dx: f32, dy: f32) {
+    let world = sub_apps.main.world_mut();
+    let Some(camera) = camera_for_image(world, image) else {
+        return;
+    };
+    // Pan in the camera's right/up plane; speed scales with distance.
+    let (right, up, dist) = {
+        let xf = world.get::<Transform>(camera).copied().unwrap_or_default();
+        let orbit = world.resource::<OrbitCamera>();
+        (xf.right(), xf.up(), orbit.distance)
+    };
+    let k = dist * 0.0015;
+    {
+        let mut orbit = world.resource_mut::<OrbitCamera>();
+        orbit.focus += (-right * dx + up * dy) * k;
+    }
+    apply_orbit_camera(world, camera);
+}
+
+fn camera_zoom(sub_apps: &mut SubApps, image: AssetId<Image>, delta: f32) {
+    let world = sub_apps.main.world_mut();
+    let Some(camera) = camera_for_image(world, image) else {
+        return;
+    };
+    {
+        let mut orbit = world.resource_mut::<OrbitCamera>();
+        // Exponential zoom feels natural; scroll up (negative delta) = zoom in.
+        orbit.distance = (orbit.distance * (delta * 0.001).exp()).clamp(0.5, 500.0);
+    }
+    apply_orbit_camera(world, camera);
+}
+
+fn camera_look(sub_apps: &mut SubApps, image: AssetId<Image>, dx: f32, dy: f32) {
+    let world = sub_apps.main.world_mut();
+    let Some(camera) = camera_for_image(world, image) else {
+        return;
+    };
+    // Free-look rotates the orbit angles but keeps the focus ahead of the camera
+    // so subsequent orbit/pan behave intuitively.
+    {
+        let mut orbit = world.resource_mut::<OrbitCamera>();
+        orbit.yaw -= dx * 0.006;
+        orbit.pitch = (orbit.pitch + dy * 0.006).clamp(-PITCH_LIMIT, PITCH_LIMIT);
+    }
+    apply_orbit_camera(world, camera);
+}
+
+fn camera_fly(
+    sub_apps: &mut SubApps,
+    image: AssetId<Image>,
+    forward: f32,
+    right: f32,
+    up: f32,
+    dt: f32,
+) {
+    let world = sub_apps.main.world_mut();
+    let Some(camera) = camera_for_image(world, image) else {
+        return;
+    };
+    let (fwd, rgt, dist) = {
+        let xf = world.get::<Transform>(camera).copied().unwrap_or_default();
+        let orbit = world.resource::<OrbitCamera>();
+        (xf.forward(), xf.right(), orbit.distance)
+    };
+    // Move the focus (and thus the camera) along the camera basis. Speed scales
+    // with distance so it feels consistent at any zoom level.
+    let speed = (dist * 1.5).max(2.0);
+    let motion = (fwd * forward + rgt * right + Vec3::Y * up) * speed * dt;
+    {
+        let mut orbit = world.resource_mut::<OrbitCamera>();
+        orbit.focus += motion;
+    }
+    apply_orbit_camera(world, camera);
 }
 
 /// Draw the selection outline + transform gizmo (immediate mode, into the

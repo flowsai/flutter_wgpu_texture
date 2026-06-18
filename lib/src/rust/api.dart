@@ -87,6 +87,46 @@ void selectEntity({required BigInt handle, String? id}) =>
 void setGizmoMode({required BigInt handle, required String mode}) =>
     RustLib.instance.api.crateApiSetGizmoMode(handle: handle, mode: mode);
 
+/// Orbit the camera around its focus point (Alt+LMB drag).
+void cameraOrbit({
+  required BigInt handle,
+  required double dx,
+  required double dy,
+}) => RustLib.instance.api.crateApiCameraOrbit(handle: handle, dx: dx, dy: dy);
+
+/// Pan the camera focus in the view plane (MMB drag).
+void cameraPan({
+  required BigInt handle,
+  required double dx,
+  required double dy,
+}) => RustLib.instance.api.crateApiCameraPan(handle: handle, dx: dx, dy: dy);
+
+/// Zoom toward/away from the focus (scroll wheel). Positive delta = zoom out.
+void cameraZoom({required BigInt handle, required double delta}) =>
+    RustLib.instance.api.crateApiCameraZoom(handle: handle, delta: delta);
+
+/// Free-look rotate in place (RMB drag).
+void cameraLook({
+  required BigInt handle,
+  required double dx,
+  required double dy,
+}) => RustLib.instance.api.crateApiCameraLook(handle: handle, dx: dx, dy: dy);
+
+/// Fly the camera along its basis (RMB + WASD). forward/right/up in [-1,1].
+void cameraFly({
+  required BigInt handle,
+  required double forward,
+  required double right,
+  required double up,
+  required double dt,
+}) => RustLib.instance.api.crateApiCameraFly(
+  handle: handle,
+  forward: forward,
+  right: right,
+  up: up,
+  dt: dt,
+);
+
 BackendInfo getBackendInfo({required BigInt handle}) =>
     RustLib.instance.api.crateApiGetBackendInfo(handle: handle);
 

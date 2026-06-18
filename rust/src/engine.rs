@@ -194,6 +194,47 @@ impl Renderer {
         });
     }
 
+    fn camera_orbit(&mut self, dx: f32, dy: f32) {
+        let _ = bevy_app::send(RenderCmd::CameraOrbit {
+            image: self.viewport_image,
+            dx,
+            dy,
+        });
+    }
+
+    fn camera_pan(&mut self, dx: f32, dy: f32) {
+        let _ = bevy_app::send(RenderCmd::CameraPan {
+            image: self.viewport_image,
+            dx,
+            dy,
+        });
+    }
+
+    fn camera_zoom(&mut self, delta: f32) {
+        let _ = bevy_app::send(RenderCmd::CameraZoom {
+            image: self.viewport_image,
+            delta,
+        });
+    }
+
+    fn camera_look(&mut self, dx: f32, dy: f32) {
+        let _ = bevy_app::send(RenderCmd::CameraLook {
+            image: self.viewport_image,
+            dx,
+            dy,
+        });
+    }
+
+    fn camera_fly(&mut self, forward: f32, right: f32, up: f32, dt: f32) {
+        let _ = bevy_app::send(RenderCmd::CameraFly {
+            image: self.viewport_image,
+            forward,
+            right,
+            up,
+            dt,
+        });
+    }
+
     /// Render one frame and copy it into the present target's shared texture.
     fn render(&mut self) -> Result<bool, String> {
         let dst = self
@@ -354,6 +395,26 @@ pub(crate) fn set_gizmo_mode(handle: u64, mode: &str) -> Result<(), String> {
         .set_gizmo_mode(mode);
     Ok(())
 }
+
+macro_rules! camera_fn {
+    ($name:ident, $method:ident, $($arg:ident: $ty:ty),*) => {
+        pub(crate) fn $name(handle: u64, $($arg: $ty),*) -> Result<(), String> {
+            let renderer =
+                lookup_renderer(handle).ok_or_else(|| "renderer handle not found".to_string())?;
+            renderer
+                .lock()
+                .unwrap_or_else(|err| err.into_inner())
+                .$method($($arg),*);
+            Ok(())
+        }
+    };
+}
+
+camera_fn!(camera_orbit, camera_orbit, dx: f32, dy: f32);
+camera_fn!(camera_pan, camera_pan, dx: f32, dy: f32);
+camera_fn!(camera_zoom, camera_zoom, delta: f32);
+camera_fn!(camera_look, camera_look, dx: f32, dy: f32);
+camera_fn!(camera_fly, camera_fly, forward: f32, right: f32, up: f32, dt: f32);
 
 pub(crate) fn resize_renderer(handle: u64, width: u32, height: u32) -> Result<(), String> {
     let renderer =

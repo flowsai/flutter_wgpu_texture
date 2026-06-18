@@ -105,6 +105,38 @@ pub fn set_gizmo_mode(handle: u64, mode: String) -> Result<(), String> {
     engine::set_gizmo_mode(handle, &mode)
 }
 
+// ── Camera navigation (Unity-style; deltas are render-target pixels) ──────────
+
+/// Orbit the camera around its focus point (Alt+LMB drag).
+#[frb(sync)]
+pub fn camera_orbit(handle: u64, dx: f32, dy: f32) -> Result<(), String> {
+    engine::camera_orbit(handle, dx, dy)
+}
+
+/// Pan the camera focus in the view plane (MMB drag).
+#[frb(sync)]
+pub fn camera_pan(handle: u64, dx: f32, dy: f32) -> Result<(), String> {
+    engine::camera_pan(handle, dx, dy)
+}
+
+/// Zoom toward/away from the focus (scroll wheel). Positive delta = zoom out.
+#[frb(sync)]
+pub fn camera_zoom(handle: u64, delta: f32) -> Result<(), String> {
+    engine::camera_zoom(handle, delta)
+}
+
+/// Free-look rotate in place (RMB drag).
+#[frb(sync)]
+pub fn camera_look(handle: u64, dx: f32, dy: f32) -> Result<(), String> {
+    engine::camera_look(handle, dx, dy)
+}
+
+/// Fly the camera along its basis (RMB + WASD). forward/right/up in [-1,1].
+#[frb(sync)]
+pub fn camera_fly(handle: u64, forward: f32, right: f32, up: f32, dt: f32) -> Result<(), String> {
+    engine::camera_fly(handle, forward, right, up, dt)
+}
+
 #[frb(sync)]
 pub fn get_backend_info(handle: u64) -> Result<BackendInfo, String> {
     engine::renderer_backend_info(handle)

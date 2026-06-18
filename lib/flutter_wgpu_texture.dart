@@ -12,4 +12,9 @@ export 'src/rust/api.dart'
         setScene,
         pick,
         selectEntity,
-        setGizmoMode;
+        setGizmoMode,
+        cameraOrbit,
+        cameraPan,
+        cameraZoom,
+        cameraLook,
+        cameraFly;

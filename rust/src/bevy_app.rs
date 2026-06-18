@@ -14,8 +14,8 @@
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, OnceLock};
 
-use bevy::app::{App, AppLabel, PluginsState, SubApps};
-use bevy::asset::{AssetId, RenderAssetUsages};
+use bevy::app::{App, PluginsState, SubApps};
+use bevy::asset::AssetId;
 use bevy::camera::primitives::Aabb;
 use bevy::camera::{Camera, RenderTarget};
 use bevy::ecs::resource::Resource;
@@ -23,14 +23,11 @@ use bevy::ecs::system::{In, RunSystemOnce};
 use bevy::image::Image;
 use bevy::picking::mesh_picking::ray_cast::{MeshRayCast, MeshRayCastSettings, RayCastVisibility};
 use bevy::prelude::*;
-use bevy::render::render_asset::RenderAssets;
-use bevy::render::render_resource::{PollType, TextureFormat};
 use bevy::render::renderer::{RenderAdapterInfo, RenderDevice, RenderQueue};
-use bevy::render::texture::GpuImage;
-use bevy::render::RenderApp;
 use bevy::window::ExitCondition;
 
 use crate::level::{self, EditorIdMap};
+use crate::viewport;
 
 /// Transform gizmo interaction mode (mirrors the Dart `GizmoMode`).
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
@@ -110,47 +107,6 @@ impl TransformOut {
     }
 }
 
-/// Orbit/pan/zoom camera state for the viewport (Unity-style navigation).
-/// `yaw`/`pitch` are spherical angles around `focus` at `distance`.
-#[derive(Resource)]
-pub(crate) struct OrbitCamera {
-    pub(crate) focus: Vec3,
-    pub(crate) yaw: f32,
-    pub(crate) pitch: f32,
-    pub(crate) distance: f32,
-}
-
-impl Default for OrbitCamera {
-    fn default() -> Self {
-        // Frame the default scene from roughly (3,3,6) looking at origin.
-        Self {
-            focus: Vec3::ZERO,
-            yaw: 0.46,    // ~26° around Y
-            pitch: 0.42,  // ~24° above horizon
-            distance: 7.3,
-        }
-    }
-}
-
-impl OrbitCamera {
-    /// Camera world position from the spherical orbit parameters.
-    fn position(&self) -> Vec3 {
-        let (sy, cy) = self.yaw.sin_cos();
-        let (sp, cp) = self.pitch.sin_cos();
-        self.focus + Vec3::new(self.distance * cp * sy, self.distance * sp, self.distance * cp * cy)
-    }
-
-    fn transform(&self) -> Transform {
-        Transform::from_translation(self.position()).looking_at(self.focus, Vec3::Y)
-    }
-}
-
-const PITCH_LIMIT: f32 = std::f32::consts::FRAC_PI_2 - 0.05;
-
-/// Format of the offscreen render target. MUST match the wgpu format of the
-/// package's DMA-BUF `shared_texture` (Bgra8Unorm) for copy_texture_to_texture.
-const TARGET_FORMAT: TextureFormat = TextureFormat::Bgra8Unorm;
-
 // ── Shared device handle, published once the Bevy app has built it ────────────
 
 pub(crate) struct SharedGpu {
@@ -163,6 +119,12 @@ pub(crate) struct SharedGpu {
 
 static SHARED_GPU: OnceLock<Result<SharedGpu, String>> = OnceLock::new();
 static CMD_TX: OnceLock<Sender<RenderCmd>> = OnceLock::new();
+
+/// Borrow the shared GPU handle once the Bevy app has built it. Lets other
+/// modules (e.g. `viewport`) reach the device without knowing the OnceLock.
+pub(crate) fn shared_gpu() -> Option<&'static SharedGpu> {
+    SHARED_GPU.get().and_then(|r| r.as_ref().ok())
+}
 
 // ── Commands sent to the render thread ───────────────────────────────────────
 
@@ -239,14 +201,6 @@ pub(crate) enum RenderCmd {
     Shutdown,
 }
 
-/// Per-viewport bookkeeping kept on the render thread.
-struct Viewport {
-    image: AssetId<Image>,
-    camera: Entity,
-    width: u32,
-    height: u32,
-}
-
 // ── Public API used by engine.rs ─────────────────────────────────────────────
 
 /// Ensure the global Bevy render thread is running and the shared device built.
@@ -302,7 +256,7 @@ fn render_thread_main(ready_tx: Sender<Result<(), String>>) {
     let _ = CMD_TX.set(cmd_tx);
     let _ = ready_tx.send(Ok(()));
 
-    let mut viewports: Vec<Viewport> = Vec::new();
+    let mut viewports: Vec<viewport::Viewport> = Vec::new();
 
     while let Ok(cmd) = cmd_rx.recv() {
         match cmd {
@@ -311,8 +265,8 @@ fn render_thread_main(ready_tx: Sender<Result<(), String>>) {
                 height,
                 reply,
             } => {
-                let (image, camera) = spawn_viewport(&mut sub_apps, width, height);
-                viewports.push(Viewport {
+                let (image, camera) = viewport::spawn_viewport(&mut sub_apps, width, height);
+                viewports.push(viewport::Viewport {
                     image,
                     camera,
                     width,
@@ -337,7 +291,7 @@ fn render_thread_main(ready_tx: Sender<Result<(), String>>) {
                 height,
             } => {
                 if let Some(v) = viewports.iter_mut().find(|v| v.image == image) {
-                    resize_viewport_image(&mut sub_apps, image, width, height);
+                    viewport::resize_viewport_image(&mut sub_apps, image, width, height);
                     v.width = width;
                     v.height = height;
                 }
@@ -358,16 +312,16 @@ fn render_thread_main(ready_tx: Sender<Result<(), String>>) {
                 world.resource_mut::<EditorSelection>().mode = GizmoMode::from_str(&mode);
             }
             RenderCmd::CameraOrbit { image, dx, dy } => {
-                camera_orbit(&mut sub_apps, image, dx, dy);
+                viewport::camera::camera_orbit(&mut sub_apps, image, dx, dy);
             }
             RenderCmd::CameraPan { image, dx, dy } => {
-                camera_pan(&mut sub_apps, image, dx, dy);
+                viewport::camera::camera_pan(&mut sub_apps, image, dx, dy);
             }
             RenderCmd::CameraZoom { image, delta } => {
-                camera_zoom(&mut sub_apps, image, delta);
+                viewport::camera::camera_zoom(&mut sub_apps, image, delta);
             }
             RenderCmd::CameraLook { image, dx, dy } => {
-                camera_look(&mut sub_apps, image, dx, dy);
+                viewport::camera::camera_look(&mut sub_apps, image, dx, dy);
             }
             RenderCmd::CameraFly {
                 image,
@@ -376,7 +330,7 @@ fn render_thread_main(ready_tx: Sender<Result<(), String>>) {
                 up,
                 dt,
             } => {
-                camera_fly(&mut sub_apps, image, forward, right, up, dt);
+                viewport::camera::camera_fly(&mut sub_apps, image, forward, right, up, dt);
             }
             RenderCmd::DragBegin { image, x, y, reply } => {
                 let grabbed = drag_begin(&mut sub_apps, image, Vec2::new(x, y));
@@ -401,7 +355,7 @@ fn render_thread_main(ready_tx: Sender<Result<(), String>>) {
                 height,
                 reply,
             } => {
-                let result = render_one_frame(&mut sub_apps, image, dst.as_ref(), width, height);
+                let result = viewport::render_one_frame(&mut sub_apps, image, dst.as_ref(), width, height);
                 let _ = reply.send(result);
             }
             RenderCmd::Shutdown => break,
@@ -487,7 +441,7 @@ fn build_app() -> Result<(SubApps, SharedGpu), String> {
     }
 
     // Orbit camera state for the viewport (one viewport in v1).
-    app.world_mut().init_resource::<OrbitCamera>();
+    app.world_mut().init_resource::<viewport::camera::OrbitCamera>();
     app.world_mut().init_resource::<GizmoHover>();
     app.world_mut().init_resource::<DragState>();
 
@@ -508,42 +462,6 @@ fn build_app() -> Result<(SubApps, SharedGpu), String> {
     let sub_apps = std::mem::take(app.sub_apps_mut());
     Ok((sub_apps, gpu))
 }
-
-// ── Scene + viewport management (render thread only) ──────────────────────────
-
-fn make_target_image(width: u32, height: u32) -> Image {
-    let mut img = Image::new_target_texture(width.max(1), height.max(1), TARGET_FORMAT, None);
-    // new_target_texture omits COPY_SRC; required for the cross-copy into shared_texture.
-    img.texture_descriptor.usage |= wgpu::TextureUsages::COPY_SRC;
-    img.asset_usage = RenderAssetUsages::RENDER_WORLD;
-    img
-}
-
-fn spawn_viewport(sub_apps: &mut SubApps, width: u32, height: u32) -> (AssetId<Image>, Entity) {
-    let world = sub_apps.main.world_mut();
-    let img = make_target_image(width, height);
-    let handle = world.resource_mut::<Assets<Image>>().add(img);
-    let image_id = handle.id();
-    // In this Bevy, RenderTarget is its own component (not Camera.target).
-    world.init_resource::<OrbitCamera>();
-    let cam_xf = world.resource::<OrbitCamera>().transform();
-    let camera = world
-        .spawn((
-            Camera3d::default(),
-            RenderTarget::Image(handle.into()),
-            cam_xf,
-        ))
-        .id();
-    (image_id, camera)
-}
-
-fn resize_viewport_image(sub_apps: &mut SubApps, image: AssetId<Image>, width: u32, height: u32) {
-    let world = sub_apps.main.world_mut();
-    let new_image = make_target_image(width, height);
-    let mut images = world.resource_mut::<Assets<Image>>();
-    let _ = images.insert(image, new_image);
-}
-
 // ── Picking + selection ───────────────────────────────────────────────────────
 
 /// Raycast from a viewport pixel into the scene, return the hit editor id.
@@ -580,113 +498,6 @@ fn set_selection(sub_apps: &mut SubApps, id: Option<String>) {
         .as_ref()
         .and_then(|id| world.resource::<EditorIdMap>().fwd.get(id).copied());
     world.resource_mut::<EditorSelection>().selected = entity;
-}
-
-// ── Camera navigation (Unity-style; driven by Flutter-fed deltas) ─────────────
-
-/// Find the camera entity rendering to `image`.
-fn camera_for_image(world: &mut World, image: AssetId<Image>) -> Option<Entity> {
-    let mut q = world.query::<(Entity, &RenderTarget)>();
-    q.iter(world)
-        .find(|(_, rt)| matches!(rt, RenderTarget::Image(h) if h.handle.id() == image))
-        .map(|(e, _)| e)
-}
-
-/// Write the orbit camera's transform onto the camera entity.
-fn apply_orbit_camera(world: &mut World, camera: Entity) {
-    let orbit = world.resource::<OrbitCamera>();
-    let new_xf = orbit.transform();
-    if let Some(mut t) = world.get_mut::<Transform>(camera) {
-        *t = new_xf;
-    }
-}
-
-fn camera_orbit(sub_apps: &mut SubApps, image: AssetId<Image>, dx: f32, dy: f32) {
-    let world = sub_apps.main.world_mut();
-    let Some(camera) = camera_for_image(world, image) else {
-        return;
-    };
-    {
-        let mut orbit = world.resource_mut::<OrbitCamera>();
-        orbit.yaw -= dx * 0.008;
-        orbit.pitch = (orbit.pitch + dy * 0.008).clamp(-PITCH_LIMIT, PITCH_LIMIT);
-    }
-    apply_orbit_camera(world, camera);
-}
-
-fn camera_pan(sub_apps: &mut SubApps, image: AssetId<Image>, dx: f32, dy: f32) {
-    let world = sub_apps.main.world_mut();
-    let Some(camera) = camera_for_image(world, image) else {
-        return;
-    };
-    // Pan in the camera's right/up plane; speed scales with distance.
-    let (right, up, dist) = {
-        let xf = world.get::<Transform>(camera).copied().unwrap_or_default();
-        let orbit = world.resource::<OrbitCamera>();
-        (xf.right(), xf.up(), orbit.distance)
-    };
-    let k = dist * 0.0015;
-    {
-        let mut orbit = world.resource_mut::<OrbitCamera>();
-        orbit.focus += (-right * dx + up * dy) * k;
-    }
-    apply_orbit_camera(world, camera);
-}
-
-fn camera_zoom(sub_apps: &mut SubApps, image: AssetId<Image>, delta: f32) {
-    let world = sub_apps.main.world_mut();
-    let Some(camera) = camera_for_image(world, image) else {
-        return;
-    };
-    {
-        let mut orbit = world.resource_mut::<OrbitCamera>();
-        // Exponential zoom feels natural; scroll up (negative delta) = zoom in.
-        orbit.distance = (orbit.distance * (delta * 0.001).exp()).clamp(0.5, 500.0);
-    }
-    apply_orbit_camera(world, camera);
-}
-
-fn camera_look(sub_apps: &mut SubApps, image: AssetId<Image>, dx: f32, dy: f32) {
-    let world = sub_apps.main.world_mut();
-    let Some(camera) = camera_for_image(world, image) else {
-        return;
-    };
-    // Free-look rotates the orbit angles but keeps the focus ahead of the camera
-    // so subsequent orbit/pan behave intuitively.
-    {
-        let mut orbit = world.resource_mut::<OrbitCamera>();
-        orbit.yaw -= dx * 0.006;
-        orbit.pitch = (orbit.pitch + dy * 0.006).clamp(-PITCH_LIMIT, PITCH_LIMIT);
-    }
-    apply_orbit_camera(world, camera);
-}
-
-fn camera_fly(
-    sub_apps: &mut SubApps,
-    image: AssetId<Image>,
-    forward: f32,
-    right: f32,
-    up: f32,
-    dt: f32,
-) {
-    let world = sub_apps.main.world_mut();
-    let Some(camera) = camera_for_image(world, image) else {
-        return;
-    };
-    let (fwd, rgt, dist) = {
-        let xf = world.get::<Transform>(camera).copied().unwrap_or_default();
-        let orbit = world.resource::<OrbitCamera>();
-        (xf.forward(), xf.right(), orbit.distance)
-    };
-    // Move the focus (and thus the camera) along the camera basis. Speed scales
-    // with distance so it feels consistent at any zoom level.
-    let speed = (dist * 1.5).max(2.0);
-    let motion = (fwd * forward + rgt * right + Vec3::Y * up) * speed * dt;
-    {
-        let mut orbit = world.resource_mut::<OrbitCamera>();
-        orbit.focus += motion;
-    }
-    apply_orbit_camera(world, camera);
 }
 
 /// Draw the selection outline + transform gizmo (immediate mode, into the
@@ -1059,82 +870,4 @@ fn drag_update_system(
     let mut t = transforms.get_mut(entity).ok()?;
     *t = new_t;
     Some(TransformOut::from_transform(&new_t))
-}
-
-fn render_one_frame(
-    sub_apps: &mut SubApps,
-    image: AssetId<Image>,
-    dst: Option<&wgpu::Texture>,
-    width: u32,
-    height: u32,
-) -> Result<bool, String> {
-    level::ensure_default_scene(sub_apps);
-
-    // Pump one full frame (Extract -> render-world Render schedule -> submit).
-    sub_apps.update();
-
-    let gpu = SHARED_GPU
-        .get()
-        .and_then(|r| r.as_ref().ok())
-        .ok_or_else(|| "shared gpu missing".to_string())?;
-
-    // Wait for the GPU to finish this frame's submissions before copying.
-    gpu.device
-        .poll(PollType::Wait {
-            submission_index: None,
-            timeout: None,
-        })
-        .map_err(|e| format!("device.poll failed: {e:?}"))?;
-
-    let Some(dst) = dst else {
-        return Ok(true);
-    };
-
-    // Reach into the render sub-app world for the rendered GpuImage texture.
-    let render_app = sub_apps
-        .sub_apps
-        .get_mut(&RenderApp.intern())
-        .ok_or_else(|| "RenderApp sub-app missing".to_string())?;
-    let gpu_images = render_app
-        .world()
-        .get_resource::<RenderAssets<GpuImage>>()
-        .ok_or_else(|| "RenderAssets<GpuImage> missing".to_string())?;
-    let Some(gpu_image) = gpu_images.get(image) else {
-        // Image not prepared yet (first frame). Not an error; just no copy.
-        return Ok(false);
-    };
-
-    let mut encoder = gpu
-        .device
-        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("bevy->dmabuf cross copy"),
-        });
-    encoder.copy_texture_to_texture(
-        wgpu::TexelCopyTextureInfo {
-            texture: &gpu_image.texture,
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
-        },
-        wgpu::TexelCopyTextureInfo {
-            texture: dst,
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
-        },
-        wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-    );
-    gpu.queue.submit([encoder.finish()]);
-    gpu.device
-        .poll(PollType::Wait {
-            submission_index: None,
-            timeout: None,
-        })
-        .map_err(|e| format!("device.poll (copy) failed: {e:?}"))?;
-
-    Ok(true)
 }

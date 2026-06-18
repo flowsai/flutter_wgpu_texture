@@ -6,6 +6,7 @@ mod level;
 #[cfg(target_os = "linux")]
 mod linux_dma_buf;
 mod present;
+mod viewport;
 
 // Re-export FRB boilerplate symbols so a combined workspace cdylib can pull
 // them in via `pub use flutter_wgpu_texture_engine::*`.  These live inside

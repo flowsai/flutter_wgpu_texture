@@ -2,9 +2,11 @@ pub mod api;
 mod bevy_app;
 mod engine;
 mod frb_generated;
+mod gizmo;
 mod level;
 #[cfg(target_os = "linux")]
 mod linux_dma_buf;
+mod picking;
 mod present;
 mod viewport;
 

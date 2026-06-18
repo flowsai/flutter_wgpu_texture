@@ -7,7 +7,6 @@ import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 @Deprecated('Template API removed. Expose your own Rust methods instead.')
-Never greet({required String name}) =>
-    throw UnsupportedError(
-      'Template greet() API was removed from flutter_wgpu_texture.',
-    );
+Never greet({required String name}) => throw UnsupportedError(
+  'Template greet() API was removed from flutter_wgpu_texture.',
+);

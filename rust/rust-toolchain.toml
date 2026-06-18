@@ -1,5 +1,8 @@
 [toolchain]
-channel = "1.92.0"
+# Bevy 0.19-dev (edition 2024) requires rustc >= 1.95. We pin an exact dated
+# nightly: native_toolchain_rust (the Flutter build hook) rejects the bare
+# `nightly`/`stable`/`beta` channels but accepts an exact version/date.
+channel = "nightly-2026-06-17"
 targets = [
   "aarch64-apple-darwin",
   "x86_64-apple-darwin",

@@ -1,42 +1,40 @@
+//! Renderer registry + device context.
+//!
+//! The actual rendering is performed by Bevy on a dedicated thread (see
+//! `bevy_app`). This module keeps the per-viewport handle bookkeeping, the
+//! shared wgpu device borrowed from Bevy, and the Linux DMA-BUF present/export
+//! path that bridges the rendered frame to Flutter.
+
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Instant;
 
-#[cfg(target_os = "linux")]
-use ash::vk;
-#[cfg(any(target_os = "macos", target_os = "ios"))]
-use metal::foreign_types::ForeignType;
-#[cfg(any(target_os = "macos", target_os = "ios"))]
-use wgpu_hal::api::Metal;
-#[cfg(target_os = "linux")]
-use wgpu_hal::api::Vulkan;
+use bevy::asset::AssetId;
+use bevy::image::Image;
 
 use crate::api::BackendInfo;
+use crate::bevy_app::{self, RenderCmd};
 #[cfg(target_os = "linux")]
 use crate::linux_dma_buf;
 use crate::present::{self, PresentTextureTarget};
-use crate::scene::{Scene, SceneRenderArgs};
-use crate::scenes;
 
 pub(crate) const BACKEND_UNKNOWN: u8 = 0;
 pub(crate) const BACKEND_METAL: u8 = 1;
 pub(crate) const BACKEND_DX12: u8 = 2;
 pub(crate) const BACKEND_VULKAN: u8 = 3;
 
-static DEVICE_CONTEXT: OnceLock<Result<EngineDeviceContext, String>> = OnceLock::new();
 static RENDERERS: OnceLock<Mutex<HashMap<u64, Arc<Mutex<Renderer>>>>> = OnceLock::new();
 static NEXT_HANDLE: OnceLock<Mutex<u64>> = OnceLock::new();
 
-struct EngineDeviceContext {
-    device: Arc<wgpu::Device>,
-    queue: Arc<wgpu::Queue>,
-    backend: u8,
-    backend_name: String,
-    driver: String,
-    device_name: String,
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
-    mtl_device_ptr: usize,
+/// Borrowed view of the Bevy-owned wgpu device.
+pub(crate) struct EngineDeviceContext {
+    pub(crate) device: Arc<wgpu::Device>,
+    #[allow(dead_code)]
+    pub(crate) queue: Arc<wgpu::Queue>,
+    pub(crate) backend: u8,
+    pub(crate) backend_name: String,
+    pub(crate) driver: String,
+    pub(crate) device_name: String,
 }
 
 pub(crate) struct Renderer {
@@ -44,9 +42,9 @@ pub(crate) struct Renderer {
     width: u32,
     height: u32,
     present: Option<PresentTextureTarget>,
-    scene: Box<dyn Scene>,
+    /// Bevy offscreen render-target image for this viewport.
+    viewport_image: AssetId<Image>,
     animation_running: bool,
-    last_frame_at: Instant,
     clear_color: [f32; 4],
 }
 
@@ -64,208 +62,28 @@ fn next_handle() -> u64 {
     handle
 }
 
-fn backend_code(backend: wgpu::Backend) -> u8 {
-    match backend {
-        wgpu::Backend::Metal => BACKEND_METAL,
-        wgpu::Backend::Dx12 => BACKEND_DX12,
-        wgpu::Backend::Vulkan => BACKEND_VULKAN,
+fn backend_code(name: &str) -> u8 {
+    match name {
+        "Metal" => BACKEND_METAL,
+        "Dx12" => BACKEND_DX12,
+        "Vulkan" => BACKEND_VULKAN,
         _ => BACKEND_UNKNOWN,
     }
 }
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
-fn mtl_device_ptr(device: &wgpu::Device) -> *mut c_void {
-    let result = unsafe {
-        device.as_hal::<Metal, _, _>(|hal_device| {
-            hal_device.map(|hal_device| {
-                let raw_device = hal_device.raw_device().lock();
-                raw_device.as_ptr() as *mut c_void
-            })
-        })
-    };
-    result.flatten().unwrap_or(std::ptr::null_mut())
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "ios")))]
-#[allow(dead_code)]
-fn mtl_device_ptr(_device: &wgpu::Device) -> *mut c_void {
-    std::ptr::null_mut()
-}
-
-#[cfg(target_os = "linux")]
-fn request_linux_vulkan_device_with_dmabuf(
-    adapter: &wgpu::Adapter,
-    required_features: wgpu::Features,
-    required_limits: &wgpu::Limits,
-) -> Result<(wgpu::Device, wgpu::Queue), String> {
-    use std::ffi::CStr;
-    unsafe {
-        adapter.as_hal::<Vulkan, _, _>(|hal_adapter| {
-            let Some(hal_adapter) = hal_adapter else {
-                return Err("wgpu: Linux Vulkan HAL adapter unavailable".to_string());
-            };
-
-            let mut enabled_extensions = hal_adapter.required_device_extensions(required_features);
-            for extension in [
-                ash::extensions::khr::ExternalMemoryFd::name(),
-                vk::ExtExternalMemoryDmaBufFn::name(),
-                vk::ExtImageDrmFormatModifierFn::name(),
-            ] {
-                if !enabled_extensions.contains(&extension) {
-                    enabled_extensions.push(extension);
-                }
-            }
-
-            let available_extensions = hal_adapter
-                .shared_instance()
-                .raw_instance()
-                .enumerate_device_extension_properties(hal_adapter.raw_physical_device())
-                .map_err(|err| {
-                    format!("wgpu: enumerate_device_extension_properties failed: {err:?}")
-                })?;
-            for extension in [
-                ash::extensions::khr::ExternalMemoryFd::name(),
-                vk::ExtExternalMemoryDmaBufFn::name(),
-                vk::ExtImageDrmFormatModifierFn::name(),
-            ] {
-                let wanted = extension.to_string_lossy();
-                let found = available_extensions.iter().any(|property| {
-                    CStr::from_ptr(property.extension_name.as_ptr()).to_string_lossy() == wanted
-                });
-                if !found {
-                    return Err(format!(
-                        "wgpu: Vulkan device extension {wanted} is not available"
-                    ));
-                }
-            }
-
-            let mut enabled_phd_features =
-                hal_adapter.physical_device_features(&enabled_extensions, required_features);
-
-            let family_index = 0u32;
-            let family_info = vk::DeviceQueueCreateInfo::builder()
-                .queue_family_index(family_index)
-                .queue_priorities(&[1.0])
-                .build();
-            let family_infos = [family_info];
-            let extension_ptrs = enabled_extensions
-                .iter()
-                .map(|extension| extension.as_ptr())
-                .collect::<Vec<_>>();
-
-            let pre_info = vk::DeviceCreateInfo::builder()
-                .queue_create_infos(&family_infos)
-                .enabled_extension_names(&extension_ptrs);
-            let info = enabled_phd_features
-                .add_to_device_create_builder(pre_info)
-                .build();
-            let raw_device = hal_adapter
-                .shared_instance()
-                .raw_instance()
-                .create_device(hal_adapter.raw_physical_device(), &info, None)
-                .map_err(|err| format!("wgpu: vkCreateDevice failed: {err:?}"))?;
-
-            let open_device = hal_adapter
-                .device_from_raw(
-                    raw_device,
-                    true,
-                    &enabled_extensions,
-                    required_features,
-                    family_index,
-                    0,
-                )
-                .map_err(|err| {
-                    format!("wgpu: device_from_raw failed for Linux Vulkan DMA-BUF: {err:?}")
-                })?;
-
-            adapter
-                .create_device_from_hal(
-                    open_device,
-                    &wgpu::DeviceDescriptor {
-                        label: Some("flutter_wgpu_texture device"),
-                        required_features,
-                        required_limits: required_limits.clone(),
-                    },
-                    None,
-                )
-                .map_err(|err| {
-                    format!("wgpu: create_device_from_hal failed for Linux Vulkan DMA-BUF: {err:?}")
-                })
-        })
-    }
-}
-
+/// Borrow the Bevy-owned device, starting the render thread on first use.
 fn device_context() -> Result<&'static EngineDeviceContext, String> {
+    static DEVICE_CONTEXT: OnceLock<Result<EngineDeviceContext, String>> = OnceLock::new();
     DEVICE_CONTEXT
         .get_or_init(|| {
-            let backends = if cfg!(any(target_os = "macos", target_os = "ios")) {
-                wgpu::Backends::METAL
-            } else if cfg!(target_os = "windows") {
-                wgpu::Backends::DX12
-            } else {
-                wgpu::Backends::PRIMARY
-            };
-
-            let instance = Arc::new(wgpu::Instance::new(wgpu::InstanceDescriptor {
-                backends,
-                ..Default::default()
-            }));
-            let adapter =
-                pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-                    power_preference: wgpu::PowerPreference::HighPerformance,
-                    compatible_surface: None,
-                    force_fallback_adapter: false,
-                }))
-                .ok_or_else(|| "wgpu: no compatible adapter found".to_string())?;
-            let info = adapter.get_info();
-            let adapter = Arc::new(adapter);
-            let required_features = wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
-            let limits = adapter.limits();
-            let (device, queue) = {
-                #[cfg(target_os = "linux")]
-                {
-                    if info.backend == wgpu::Backend::Vulkan {
-                        request_linux_vulkan_device_with_dmabuf(
-                            adapter.as_ref(),
-                            required_features,
-                            &limits,
-                        )?
-                    } else {
-                        pollster::block_on(adapter.request_device(
-                            &wgpu::DeviceDescriptor {
-                                label: Some("flutter_wgpu_texture device"),
-                                required_features,
-                                required_limits: limits,
-                            },
-                            None,
-                        ))
-                        .map_err(|err| format!("wgpu: request_device failed: {err:?}"))?
-                    }
-                }
-                #[cfg(not(target_os = "linux"))]
-                {
-                    pollster::block_on(adapter.request_device(
-                        &wgpu::DeviceDescriptor {
-                            label: Some("flutter_wgpu_texture device"),
-                            required_features,
-                            required_limits: limits,
-                        },
-                        None,
-                    ))
-                    .map_err(|err| format!("wgpu: request_device failed: {err:?}"))?
-                }
-            };
-            #[cfg(any(target_os = "macos", target_os = "ios"))]
-            let mtl_ptr = mtl_device_ptr(&device) as usize;
+            let gpu = bevy_app::ensure_started()?;
             Ok(EngineDeviceContext {
-                device: Arc::new(device),
-                queue: Arc::new(queue),
-                backend: backend_code(info.backend),
-                backend_name: format!("{:?}", info.backend),
-                driver: info.driver,
-                device_name: info.name,
-                #[cfg(any(target_os = "macos", target_os = "ios"))]
-                mtl_device_ptr: mtl_ptr,
+                device: gpu.device.clone(),
+                queue: gpu.queue.clone(),
+                backend: backend_code(&gpu.backend_name),
+                backend_name: gpu.backend_name.clone(),
+                driver: gpu.driver.clone(),
+                device_name: gpu.device_name.clone(),
             })
         })
         .as_ref()
@@ -273,19 +91,27 @@ fn device_context() -> Result<&'static EngineDeviceContext, String> {
 }
 
 impl Renderer {
-    fn new(width: u32, height: u32, scene_type: &str) -> Result<Self, String> {
+    fn new(width: u32, height: u32) -> Result<Self, String> {
         let ctx = device_context()?;
-        let device = ctx.device.as_ref();
-        let scene = scenes::scene_for_type(scene_type, device, width.max(1), height.max(1))?;
+
+        // Create the viewport (camera + offscreen image) on the render thread.
+        let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+        bevy_app::send(RenderCmd::CreateViewport {
+            width: width.max(1),
+            height: height.max(1),
+            reply: reply_tx,
+        })?;
+        let viewport_image = reply_rx
+            .recv()
+            .map_err(|_| "render thread did not return a viewport".to_string())?;
 
         Ok(Self {
             ctx,
             width: width.max(1),
             height: height.max(1),
             present: None,
-            scene,
+            viewport_image,
             animation_running: true,
-            last_frame_at: Instant::now(),
             clear_color: [0.05, 0.1, 0.15, 1.0],
         })
     }
@@ -293,43 +119,11 @@ impl Renderer {
     fn resize(&mut self, width: u32, height: u32) {
         self.width = width.max(1);
         self.height = height.max(1);
-        self.scene
-            .resize(self.ctx.device.as_ref(), self.width, self.height);
-    }
-
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
-    fn attach_metal_texture(
-        &mut self,
-        mtl_texture_ptr: *mut c_void,
-        width: u32,
-        height: u32,
-        bytes_per_row: u32,
-    ) -> Result<(), String> {
-        self.resize(width, height);
-        self.present = present::attach_present_texture(
-            self.ctx.device.as_ref(),
-            mtl_texture_ptr,
-            width,
-            height,
-            bytes_per_row,
-        );
-        if self.present.is_some() {
-            Ok(())
-        } else {
-            Err("failed to attach Metal present texture".to_string())
-        }
-    }
-
-    #[cfg(target_os = "windows")]
-    fn create_dxgi_surface(&mut self, width: u32, height: u32) -> Result<usize, String> {
-        self.resize(width, height);
-        let mut target =
-            present::create_dxgi_shared_present_target(self.ctx.device.as_ref(), width, height)?;
-        let handle = target
-            .take_dxgi_handle()
-            .ok_or_else(|| "DXGI present target missing shared handle".to_string())?;
-        self.present = Some(target);
-        Ok(handle)
+        let _ = bevy_app::send(RenderCmd::ResizeViewport {
+            image: self.viewport_image,
+            width: self.width,
+            height: self.height,
+        });
     }
 
     #[cfg(target_os = "linux")]
@@ -350,96 +144,89 @@ impl Renderer {
     }
 
     fn set_bool_param(&mut self, key: &str, value: bool) {
-        match key {
-            "animation_running" => self.animation_running = value,
-            _ => self.scene.set_bool_param(key, value),
+        if key == "animation_running" {
+            self.animation_running = value;
         }
     }
 
-    fn set_float_param(&mut self, key: &str, value: f32) {
-        self.scene.set_float_param(key, value);
-    }
+    fn set_float_param(&mut self, _key: &str, _value: f32) {}
 
     fn set_vec4_param(&mut self, key: &str, value: [f32; 4]) {
-        match key {
-            "background_color" => self.clear_color = value,
-            _ => self.scene.set_vec4_param(key, value),
+        if key == "background_color" {
+            self.clear_color = value;
         }
     }
 
-    fn invoke_command(&mut self, command: &str, payload: &str) {
+    fn invoke_command(&mut self, command: &str, _payload: &str) {
         if command == "reset_scene" {
             self.animation_running = true;
             self.clear_color = [0.05, 0.1, 0.15, 1.0];
         }
-        let _ = self.scene.invoke_command(command, payload);
     }
 
+    fn set_scene(&mut self, json: &str) {
+        let _ = bevy_app::send(RenderCmd::SetScene {
+            json: json.to_string(),
+        });
+    }
+
+    /// Raycast a viewport pixel; returns the hit editor id (blocking).
+    fn pick(&mut self, x: f32, y: f32) -> Result<Option<String>, String> {
+        let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+        bevy_app::send(RenderCmd::Pick {
+            image: self.viewport_image,
+            x,
+            y,
+            reply: reply_tx,
+        })?;
+        reply_rx
+            .recv()
+            .map_err(|_| "render thread dropped pick reply".to_string())
+    }
+
+    fn select_entity(&mut self, id: Option<String>) {
+        let _ = bevy_app::send(RenderCmd::SelectEntity { id });
+    }
+
+    fn set_gizmo_mode(&mut self, mode: &str) {
+        let _ = bevy_app::send(RenderCmd::SetGizmoMode {
+            mode: mode.to_string(),
+        });
+    }
+
+    /// Render one frame and copy it into the present target's shared texture.
     fn render(&mut self) -> Result<bool, String> {
-        let Some(target) = self.present.take() else {
-            return Ok(false);
-        };
-        let texture = target.render_texture();
-        let view = &target.render_view;
-        let width = target.width;
-        let height = target.height;
+        let dst = self
+            .present
+            .as_ref()
+            .and_then(|t| t.shared_texture().cloned());
 
-        let now = Instant::now();
-        let dt = now
-            .saturating_duration_since(self.last_frame_at)
-            .as_secs_f32();
-        self.last_frame_at = now;
-
-        let mut encoder =
-            self.ctx
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("flutter_wgpu_texture frame"),
-                });
-
-        let args = SceneRenderArgs {
-            device: self.ctx.device.as_ref(),
-            queue: self.ctx.queue.as_ref(),
-            view,
-            width,
-            height,
-            dt,
-            animation_running: self.animation_running,
-            clear_color: self.clear_color,
-        };
-        self.scene.render(&args, &mut encoder)?;
-
-        if let Some(shared) = target.shared_texture() {
-            encoder.copy_texture_to_texture(
-                wgpu::ImageCopyTexture {
-                    texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                wgpu::ImageCopyTexture {
-                    texture: shared,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                wgpu::Extent3d {
-                    width,
-                    height,
-                    depth_or_array_layers: 1,
-                },
-            );
-        }
-
-        self.ctx.queue.submit(Some(encoder.finish()));
-        self.ctx.device.poll(wgpu::Maintain::Wait);
-        self.present = Some(target);
-        Ok(true)
+        let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+        bevy_app::send(RenderCmd::RenderFrame {
+            image: self.viewport_image,
+            dst,
+            width: self.width,
+            height: self.height,
+            reply: reply_tx,
+        })?;
+        reply_rx
+            .recv()
+            .map_err(|_| "render thread dropped frame reply".to_string())?
     }
 }
 
-pub(crate) fn engine_create(width: u32, height: u32, scene_type: &str) -> Result<u64, String> {
-    let renderer = Renderer::new(width.max(1), height.max(1), scene_type)?;
+impl Drop for Renderer {
+    fn drop(&mut self) {
+        let _ = bevy_app::send(RenderCmd::DisposeViewport {
+            image: self.viewport_image,
+        });
+    }
+}
+
+// ── Public registry API (called from api/mod.rs) ─────────────────────────────
+
+pub(crate) fn engine_create(width: u32, height: u32, _scene_type: &str) -> Result<u64, String> {
+    let renderer = Renderer::new(width.max(1), height.max(1))?;
     let handle = next_handle();
     renderers()
         .lock()
@@ -528,32 +315,44 @@ pub(crate) fn invoke_command(handle: u64, command: &str, payload: &str) -> Resul
     Ok(())
 }
 
-#[cfg(target_os = "windows")]
-pub(crate) fn create_dxgi_surface(handle: u64, width: u32, height: u32) -> Result<usize, String> {
+pub(crate) fn set_scene(handle: u64, json: &str) -> Result<(), String> {
     let renderer =
         lookup_renderer(handle).ok_or_else(|| "renderer handle not found".to_string())?;
-    let surface_handle = renderer
+    renderer
         .lock()
         .unwrap_or_else(|err| err.into_inner())
-        .create_dxgi_surface(width, height)?;
-    Ok(surface_handle)
+        .set_scene(json);
+    Ok(())
 }
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
-pub(crate) fn attach_metal_texture(
-    handle: u64,
-    mtl_texture_ptr: *mut c_void,
-    width: u32,
-    height: u32,
-    bytes_per_row: u32,
-) -> Result<(), String> {
+pub(crate) fn pick(handle: u64, x: f32, y: f32) -> Result<Option<String>, String> {
     let renderer =
         lookup_renderer(handle).ok_or_else(|| "renderer handle not found".to_string())?;
     let result = renderer
         .lock()
         .unwrap_or_else(|err| err.into_inner())
-        .attach_metal_texture(mtl_texture_ptr, width, height, bytes_per_row);
+        .pick(x, y);
     result
+}
+
+pub(crate) fn select_entity(handle: u64, id: Option<String>) -> Result<(), String> {
+    let renderer =
+        lookup_renderer(handle).ok_or_else(|| "renderer handle not found".to_string())?;
+    renderer
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .select_entity(id);
+    Ok(())
+}
+
+pub(crate) fn set_gizmo_mode(handle: u64, mode: &str) -> Result<(), String> {
+    let renderer =
+        lookup_renderer(handle).ok_or_else(|| "renderer handle not found".to_string())?;
+    renderer
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .set_gizmo_mode(mode);
+    Ok(())
 }
 
 pub(crate) fn resize_renderer(handle: u64, width: u32, height: u32) -> Result<(), String> {
@@ -596,9 +395,7 @@ pub(crate) fn linux_dmabuf_supported(handle: u64) -> Result<bool, String> {
     let renderer =
         lookup_renderer(handle).ok_or_else(|| "renderer handle not found".to_string())?;
     let renderer = renderer.lock().unwrap_or_else(|err| err.into_inner());
-    Ok(linux_dma_buf::dma_buf_supported(
-        renderer.ctx.device.as_ref(),
-    ))
+    Ok(linux_dma_buf::dma_buf_supported(renderer.ctx.device.as_ref()))
 }
 
 pub(crate) fn backend_code_for_handle(handle: u64) -> u8 {
@@ -607,14 +404,28 @@ pub(crate) fn backend_code_for_handle(handle: u64) -> u8 {
         .unwrap_or(BACKEND_UNKNOWN)
 }
 
+// Metal / DXGI paths are not supported in the Bevy-shared-device build yet.
 #[cfg(any(target_os = "macos", target_os = "ios"))]
-pub(crate) fn mtl_device_ptr_for_handle(handle: u64) -> *mut c_void {
-    lookup_renderer(handle)
-        .and_then(|renderer| {
-            renderer
-                .lock()
-                .ok()
-                .map(|renderer| renderer.ctx.mtl_device_ptr as *mut c_void)
-        })
-        .unwrap_or(std::ptr::null_mut())
+pub(crate) fn attach_metal_texture(
+    _handle: u64,
+    _mtl_texture_ptr: *mut c_void,
+    _width: u32,
+    _height: u32,
+    _bytes_per_row: u32,
+) -> Result<(), String> {
+    Err("Metal present not yet supported with Bevy renderer".to_string())
 }
+
+#[cfg(target_os = "windows")]
+pub(crate) fn create_dxgi_surface(_handle: u64, _width: u32, _height: u32) -> Result<usize, String> {
+    Err("DXGI present not yet supported with Bevy renderer".to_string())
+}
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+pub(crate) fn mtl_device_ptr_for_handle(_handle: u64) -> *mut c_void {
+    std::ptr::null_mut()
+}
+
+// Silence unused import warnings on non-linux where c_void is only used by stubs.
+#[allow(unused_imports)]
+use c_void as _;

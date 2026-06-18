@@ -80,6 +80,31 @@ pub fn invoke_command(handle: u64, command: String, payload: String) -> Result<(
     engine::invoke_command(handle, &command, &payload)
 }
 
+/// Push the editor scene tree (JSON) into the Bevy renderer. The renderer diffs
+/// it against the current ECS world and spawns/updates/despawns entities.
+#[frb(sync)]
+pub fn set_scene(handle: u64, json: String) -> Result<(), String> {
+    engine::set_scene(handle, &json)
+}
+
+/// Raycast a viewport pixel; returns the hit entity's editor id (or null).
+#[frb(sync)]
+pub fn pick(handle: u64, x: f32, y: f32) -> Result<Option<String>, String> {
+    engine::pick(handle, x, y)
+}
+
+/// Set the current selection by editor id (null clears). Drives the gizmo draw.
+#[frb(sync)]
+pub fn select_entity(handle: u64, id: Option<String>) -> Result<(), String> {
+    engine::select_entity(handle, id)
+}
+
+/// Set the active transform gizmo mode: "translate" | "rotate" | "scale" | "none".
+#[frb(sync)]
+pub fn set_gizmo_mode(handle: u64, mode: String) -> Result<(), String> {
+    engine::set_gizmo_mode(handle, &mode)
+}
+
 #[frb(sync)]
 pub fn get_backend_info(handle: u64) -> Result<BackendInfo, String> {
     engine::renderer_backend_info(handle)

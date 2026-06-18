@@ -99,8 +99,6 @@ pub(crate) struct DragState {
     pub(crate) axis: Option<GizmoAxis>,
     pub(crate) start_cursor: Vec2,
     pub(crate) start_transform: Transform,
-    /// World point on the grabbed axis line at drag start (for translate).
-    pub(crate) start_axis_point: Vec3,
 }
 
 /// Transform returned to Dart after a drag update so the inspector stays in sync.
@@ -979,24 +977,6 @@ fn point_segment_dist(p: Vec2, a: Vec2, b: Vec2) -> f32 {
     p.distance(a + ab * t)
 }
 
-/// Closest point on the axis line `origin + s*dir` to the cursor ray.
-/// Returns the world point on the axis. `None` if ray ~parallel to axis.
-fn closest_axis_point(ray: Ray3d, origin: Vec3, dir: Vec3) -> Option<Vec3> {
-    let rd = *ray.direction;
-    let w0 = ray.origin - origin;
-    let a = dir.dot(dir);
-    let b = dir.dot(rd);
-    let c = rd.dot(rd);
-    let d = dir.dot(w0);
-    let e = rd.dot(w0);
-    let denom = a * c - b * b;
-    if denom.abs() < 1e-6 {
-        return None;
-    }
-    let s = (b * e - c * d) / denom;
-    Some(origin + dir * s)
-}
-
 fn drag_begin(sub_apps: &mut SubApps, image: AssetId<Image>, cursor: Vec2) -> bool {
     let world = sub_apps.main.world_mut();
     world.init_resource::<DragState>();
@@ -1050,17 +1030,10 @@ fn drag_begin_system(
         return false;
     };
 
-    let start_axis_point = cam
-        .viewport_to_world(cam_xf, cursor)
-        .ok()
-        .and_then(|ray| closest_axis_point(ray, origin, axis.dir()))
-        .unwrap_or(origin);
-
     drag.active = true;
     drag.axis = Some(axis);
     drag.start_cursor = cursor;
     drag.start_transform = obj_xf.compute_transform();
-    drag.start_axis_point = start_axis_point;
     true
 }
 
@@ -1097,36 +1070,45 @@ fn drag_update_system(
     let start = &drag.start_transform;
     let mut new_t = *start;
 
+    // Screen-space direction of the +axis at the object origin (pixels).
+    // Used to map intuitive cursor motion to signed amounts along the axis.
+    let origin2d = cam.world_to_viewport(cam_xf, start.translation).ok()?;
+    let axis_end2d = cam
+        .world_to_viewport(cam_xf, start.translation + axis_dir * GIZMO_LEN)
+        .ok()?;
+    let axis2d = (axis_end2d - origin2d).normalize_or_zero();
+    let cursor_delta = cursor - drag.start_cursor;
+
     match selection.mode {
         GizmoMode::Translate => {
-            let ray = cam.viewport_to_world(cam_xf, cursor).ok()?;
-            let now = closest_axis_point(ray, start.translation, axis_dir)?;
-            let delta = (now - drag.start_axis_point).dot(axis_dir);
-            new_t.translation = start.translation + axis_dir * delta;
+            // Move along the axis by how far the cursor dragged in the handle's
+            // ON-SCREEN direction, converted to world units via the projected
+            // length of one world unit of the axis. This makes "drag the arrow
+            // the way it points" always move along +axis (intuitive, no inversion).
+            let axis_px_per_unit = (axis_end2d - origin2d).length().max(1.0);
+            let drag_px = cursor_delta.dot(axis2d);
+            let world_delta = drag_px / axis_px_per_unit * GIZMO_LEN;
+            new_t.translation = start.translation + axis_dir * world_delta;
         }
         GizmoMode::Rotate => {
-            // Angle delta from cursor swing around the projected object center.
-            let center = cam.world_to_viewport(cam_xf, start.translation).ok()?;
-            let a0 = drag.start_cursor - center;
-            let a1 = cursor - center;
-            if a0.length_squared() < 1.0 || a1.length_squared() < 1.0 {
+            // Signed angle swept by the cursor around the projected center.
+            // Vec2::angle_to gives a CCW angle in screen space (Y-down), so a
+            // positive screen angle is CW visually — negate for intuitive feel.
+            let a0 = drag.start_cursor - origin2d;
+            let a1 = cursor - origin2d;
+            if a0.length_squared() < 4.0 || a1.length_squared() < 4.0 {
                 return None;
             }
-            let mut angle = a1.y.atan2(a1.x) - a0.y.atan2(a0.x);
-            // Flip sign when the axis points away from the camera.
-            let cam_fwd = cam_xf.forward();
-            if axis_dir.dot(*cam_fwd) > 0.0 {
-                angle = -angle;
-            }
-            new_t.rotation = Quat::from_axis_angle(axis_dir, angle) * start.rotation;
+            let screen_angle = a0.angle_to(a1); // CCW-positive in math space
+            // Axis facing the camera (dot with forward < 0) rotates the same
+            // visual direction as the screen swing; facing away flips it.
+            let facing = -axis_dir.dot(*cam_xf.forward());
+            let angle = screen_angle * facing.signum();
+            new_t.rotation = (start.rotation * Quat::from_axis_angle(axis_dir, angle)).normalize();
         }
         GizmoMode::Scale => {
-            let p0 = cam.world_to_viewport(cam_xf, start.translation).ok()?;
-            let p1 = cam
-                .world_to_viewport(cam_xf, start.translation + axis_dir * GIZMO_LEN)
-                .ok()?;
-            let axis2d = (p1 - p0).normalize_or_zero();
-            let signed = (cursor - drag.start_cursor).dot(axis2d);
+            // Drag along the axis's screen direction = grow; opposite = shrink.
+            let signed = cursor_delta.dot(axis2d);
             let factor = (1.0 + signed * 0.01).max(0.05);
             let mut scale = start.scale;
             match axis {

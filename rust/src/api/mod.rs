@@ -173,6 +173,12 @@ pub fn drag_end(handle: u64) -> Result<(), String> {
     engine::drag_end(handle)
 }
 
+/// Update the hovered gizmo handle at a viewport pixel (Unity-style highlight).
+#[frb(sync)]
+pub fn set_hover(handle: u64, x: f32, y: f32) -> Result<(), String> {
+    engine::set_hover(handle, x, y)
+}
+
 #[frb(sync)]
 pub fn get_backend_info(handle: u64) -> Result<BackendInfo, String> {
     engine::renderer_backend_info(handle)

@@ -21,4 +21,5 @@ export 'src/rust/api.dart'
         dragBegin,
         dragUpdate,
         dragEnd,
+        setHover,
         DragTransform;

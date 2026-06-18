@@ -147,6 +147,10 @@ DragTransform? dragUpdate({
 void dragEnd({required BigInt handle}) =>
     RustLib.instance.api.crateApiDragEnd(handle: handle);
 
+/// Update the hovered gizmo handle at a viewport pixel (Unity-style highlight).
+void setHover({required BigInt handle, required double x, required double y}) =>
+    RustLib.instance.api.crateApiSetHover(handle: handle, x: x, y: y);
+
 BackendInfo getBackendInfo({required BigInt handle}) =>
     RustLib.instance.api.crateApiGetBackendInfo(handle: handle);
 

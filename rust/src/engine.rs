@@ -265,6 +265,14 @@ impl Renderer {
         let _ = bevy_app::send(RenderCmd::DragEnd);
     }
 
+    fn set_hover(&mut self, x: f32, y: f32) {
+        let _ = bevy_app::send(RenderCmd::SetHover {
+            image: self.viewport_image,
+            x,
+            y,
+        });
+    }
+
     /// Render one frame and copy it into the present target's shared texture.
     fn render(&mut self) -> Result<bool, String> {
         let dst = self
@@ -477,6 +485,16 @@ pub(crate) fn drag_end(handle: u64) -> Result<(), String> {
         .lock()
         .unwrap_or_else(|err| err.into_inner())
         .drag_end();
+    Ok(())
+}
+
+pub(crate) fn set_hover(handle: u64, x: f32, y: f32) -> Result<(), String> {
+    let renderer =
+        lookup_renderer(handle).ok_or_else(|| "renderer handle not found".to_string())?;
+    renderer
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .set_hover(x, y);
     Ok(())
 }
 

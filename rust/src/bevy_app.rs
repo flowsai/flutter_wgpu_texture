@@ -92,6 +92,12 @@ impl GizmoAxis {
     }
 }
 
+/// Which gizmo handle the cursor is hovering (for Unity-style highlight).
+#[derive(Resource, Default)]
+pub(crate) struct GizmoHover {
+    pub(crate) axis: Option<GizmoAxis>,
+}
+
 /// In-progress gizmo drag state (set on drag_begin, cleared on drag_end).
 #[derive(Resource, Default)]
 pub(crate) struct DragState {
@@ -234,6 +240,8 @@ pub(crate) enum RenderCmd {
     },
     /// End the current gizmo drag.
     DragEnd,
+    /// Update which gizmo handle is hovered at a viewport pixel (highlight).
+    SetHover { image: AssetId<Image>, x: f32, y: f32 },
     /// Render one frame for `image` and copy the result into `dst`.
     RenderFrame {
         image: AssetId<Image>,
@@ -397,6 +405,9 @@ fn render_thread_main(ready_tx: Sender<Result<(), String>>) {
                 world.init_resource::<DragState>();
                 world.resource_mut::<DragState>().active = false;
             }
+            RenderCmd::SetHover { image, x, y } => {
+                set_hover(&mut sub_apps, image, Vec2::new(x, y));
+            }
             RenderCmd::RenderFrame {
                 image,
                 dst,
@@ -491,6 +502,8 @@ fn build_app() -> Result<(SubApps, SharedGpu), String> {
 
     // Orbit camera state for the viewport (one viewport in v1).
     app.world_mut().init_resource::<OrbitCamera>();
+    app.world_mut().init_resource::<GizmoHover>();
+    app.world_mut().init_resource::<DragState>();
 
     // Extract the shared device/queue/adapter info from the built app.
     let world = app.world();
@@ -891,6 +904,8 @@ fn camera_fly(
 /// offscreen camera). Runs in `Update` every frame.
 fn draw_editor_gizmos(
     selection: Res<EditorSelection>,
+    hover: Option<Res<GizmoHover>>,
+    drag: Option<Res<DragState>>,
     transforms: Query<&GlobalTransform>,
     aabbs: Query<&Aabb>,
     mut gizmos: Gizmos,
@@ -917,39 +932,56 @@ fn draw_editor_gizmos(
         gizmos.cube(Transform::from(*xf), outline_color);
     }
 
-    // Transform handles per mode (drawn in stage 3; selection outline is enough here).
-    draw_mode_gizmos(&mut gizmos, xf, selection.mode);
+    // Highlight the hovered handle (or the grabbed one while dragging).
+    let active_drag = drag.as_ref().filter(|d| d.active).and_then(|d| d.axis);
+    let highlight = active_drag.or_else(|| hover.as_ref().and_then(|h| h.axis));
+
+    draw_mode_gizmos(&mut gizmos, xf, selection.mode, highlight);
 }
 
-/// Draw translate/rotate/scale handles at the selected entity.
-fn draw_mode_gizmos(gizmos: &mut Gizmos, xf: &GlobalTransform, mode: GizmoMode) {
+/// Draw translate/rotate/scale handles at the selected entity. `highlight` is
+/// the hovered/grabbed axis, drawn in yellow (Unity-style).
+fn draw_mode_gizmos(
+    gizmos: &mut Gizmos,
+    xf: &GlobalTransform,
+    mode: GizmoMode,
+    highlight: Option<GizmoAxis>,
+) {
     let p = xf.translation();
     let len = 1.0_f32;
-    let red = Color::srgb(1.0, 0.25, 0.25);
-    let green = Color::srgb(0.25, 1.0, 0.25);
-    let blue = Color::srgb(0.3, 0.5, 1.0);
+    let yellow = Color::srgb(1.0, 0.95, 0.2);
+    let base = |axis: GizmoAxis| -> Color {
+        if Some(axis) == highlight {
+            yellow
+        } else {
+            match axis {
+                GizmoAxis::X => Color::srgb(1.0, 0.25, 0.25),
+                GizmoAxis::Y => Color::srgb(0.25, 1.0, 0.25),
+                GizmoAxis::Z => Color::srgb(0.3, 0.5, 1.0),
+            }
+        }
+    };
 
     match mode {
         GizmoMode::None => {}
         GizmoMode::Translate => {
-            gizmos.arrow(p, p + Vec3::X * len, red);
-            gizmos.arrow(p, p + Vec3::Y * len, green);
-            gizmos.arrow(p, p + Vec3::Z * len, blue);
+            for axis in [GizmoAxis::X, GizmoAxis::Y, GizmoAxis::Z] {
+                gizmos.arrow(p, p + axis.dir() * len, base(axis));
+            }
         }
         GizmoMode::Rotate => {
-            // One ring per axis, in the plane perpendicular to that axis
-            // (ring normal = axis), colors matching X=red, Y=green, Z=blue.
-            for (axis, col) in [(Vec3::X, red), (Vec3::Y, green), (Vec3::Z, blue)] {
-                let rot = Quat::from_rotation_arc(Vec3::Z, axis);
-                gizmos.circle(Isometry3d::new(p, rot), len, col);
+            for axis in [GizmoAxis::X, GizmoAxis::Y, GizmoAxis::Z] {
+                let rot = Quat::from_rotation_arc(Vec3::Z, axis.dir());
+                gizmos.circle(Isometry3d::new(p, rot), len, base(axis));
             }
         }
         GizmoMode::Scale => {
-            for (dir, col) in [(Vec3::X, red), (Vec3::Y, green), (Vec3::Z, blue)] {
-                gizmos.line(p, p + dir * len, col);
+            for axis in [GizmoAxis::X, GizmoAxis::Y, GizmoAxis::Z] {
+                let dir = axis.dir();
+                gizmos.line(p, p + dir * len, base(axis));
                 gizmos.cube(
                     Transform::from_translation(p + dir * len).with_scale(Vec3::splat(0.12)),
-                    col,
+                    base(axis),
                 );
             }
         }
@@ -992,12 +1024,75 @@ fn ray_axis_param(ray: Ray3d, origin: Vec3, dir: Vec3) -> Option<f32> {
     Some((e - b * d) / denom)
 }
 
+/// Which gizmo axis handle (if any) the cursor is over, for the given mode.
+/// Translate/scale test the axis segment; rotate tests the projected ring.
+fn gizmo_axis_at(
+    cursor: Vec2,
+    origin: Vec3,
+    mode: GizmoMode,
+    cam: &Camera,
+    cam_xf: &GlobalTransform,
+) -> Option<GizmoAxis> {
+    if mode == GizmoMode::None {
+        return None;
+    }
+    let to_screen = |w: Vec3| cam.world_to_viewport(cam_xf, w).ok();
+    let mut best: Option<(GizmoAxis, f32)> = None;
+    for axis in [GizmoAxis::X, GizmoAxis::Y, GizmoAxis::Z] {
+        let dist = match mode {
+            GizmoMode::Rotate => circle_screen_dist(cursor, origin, axis.dir(), GIZMO_LEN, &to_screen),
+            _ => {
+                let (Some(a), Some(b)) =
+                    (to_screen(origin), to_screen(origin + axis.dir() * GIZMO_LEN))
+                else {
+                    continue;
+                };
+                point_segment_dist(cursor, a, b)
+            }
+        };
+        if dist < HANDLE_PIXEL_THRESHOLD && best.map_or(true, |(_, bd)| dist < bd) {
+            best = Some((axis, dist));
+        }
+    }
+    best.map(|(axis, _)| axis)
+}
+
 fn drag_begin(sub_apps: &mut SubApps, image: AssetId<Image>, cursor: Vec2) -> bool {
     let world = sub_apps.main.world_mut();
     world.init_resource::<DragState>();
     world
         .run_system_once_with(drag_begin_system, (image, cursor))
         .unwrap_or(false)
+}
+
+fn set_hover(sub_apps: &mut SubApps, image: AssetId<Image>, cursor: Vec2) {
+    let world = sub_apps.main.world_mut();
+    world.init_resource::<GizmoHover>();
+    let _ = world.run_system_once_with(hover_system, (image, cursor));
+}
+
+fn hover_system(
+    input: In<(AssetId<Image>, Vec2)>,
+    cameras: Query<(&Camera, &GlobalTransform, &RenderTarget)>,
+    transforms: Query<&GlobalTransform>,
+    selection: Res<EditorSelection>,
+    drag: Res<DragState>,
+    mut hover: ResMut<GizmoHover>,
+) {
+    // Don't change the highlight mid-drag (the grabbed axis stays highlighted).
+    if drag.active {
+        return;
+    }
+    let (image, cursor) = input.0;
+    let axis = (|| {
+        let entity = selection.selected?;
+        let obj_xf = transforms.get(entity).ok()?;
+        let (cam, cam_xf, _) = cameras
+            .iter()
+            .find(|(_, _, rt)| matches!(rt, RenderTarget::Image(h) if h.handle.id() == image))?;
+        gizmo_axis_at(cursor, obj_xf.translation(), selection.mode, cam, cam_xf)
+    })();
+    hover.axis = axis;
 }
 
 fn drag_begin_system(
@@ -1024,33 +1119,8 @@ fn drag_begin_system(
         return false;
     };
 
-    let origin = obj_xf.translation();
-    let to_screen = |w: Vec3| cam.world_to_viewport(cam_xf, w).ok();
-
-    // Hit-test each axis handle in screen space; pick the nearest within threshold.
-    let mut best: Option<(GizmoAxis, f32)> = None;
-    for axis in [GizmoAxis::X, GizmoAxis::Y, GizmoAxis::Z] {
-        let dist = match selection.mode {
-            GizmoMode::Rotate => {
-                // Distance to the projected ring (perpendicular to the axis).
-                circle_screen_dist(cursor, origin, axis.dir(), GIZMO_LEN, &to_screen)
-            }
-            _ => {
-                // Distance to the axis segment (translate / scale).
-                let (Some(a), Some(b)) =
-                    (to_screen(origin), to_screen(origin + axis.dir() * GIZMO_LEN))
-                else {
-                    continue;
-                };
-                point_segment_dist(cursor, a, b)
-            }
-        };
-        if dist < HANDLE_PIXEL_THRESHOLD && best.map_or(true, |(_, bd)| dist < bd) {
-            best = Some((axis, dist));
-        }
-    }
-
-    let Some((axis, _)) = best else {
+    let Some(axis) = gizmo_axis_at(cursor, obj_xf.translation(), selection.mode, cam, cam_xf)
+    else {
         return false;
     };
 

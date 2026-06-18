@@ -937,17 +937,12 @@ fn draw_mode_gizmos(gizmos: &mut Gizmos, xf: &GlobalTransform, mode: GizmoMode) 
             gizmos.arrow(p, p + Vec3::Z * len, blue);
         }
         GizmoMode::Rotate => {
-            gizmos.circle(
-                Isometry3d::new(p, Quat::from_rotation_y(std::f32::consts::FRAC_PI_2)),
-                len,
-                red,
-            );
-            gizmos.circle(Isometry3d::new(p, Quat::IDENTITY), len, green);
-            gizmos.circle(
-                Isometry3d::new(p, Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
-                len,
-                blue,
-            );
+            // One ring per axis, in the plane perpendicular to that axis
+            // (ring normal = axis), colors matching X=red, Y=green, Z=blue.
+            for (axis, col) in [(Vec3::X, red), (Vec3::Y, green), (Vec3::Z, blue)] {
+                let rot = Quat::from_rotation_arc(Vec3::Z, axis);
+                gizmos.circle(Isometry3d::new(p, rot), len, col);
+            }
         }
         GizmoMode::Scale => {
             for (dir, col) in [(Vec3::X, red), (Vec3::Y, green), (Vec3::Z, blue)] {
@@ -964,7 +959,8 @@ fn draw_mode_gizmos(gizmos: &mut Gizmos, xf: &GlobalTransform, mode: GizmoMode) 
 // ── Draggable transform gizmos ────────────────────────────────────────────────
 
 const GIZMO_LEN: f32 = 1.0;
-const HANDLE_PIXEL_THRESHOLD: f32 = 14.0;
+/// Pixel radius for grabbing a gizmo handle. Generous so handles are easy to hit.
+const HANDLE_PIXEL_THRESHOLD: f32 = 18.0;
 
 /// 2D distance from point `p` to segment `a`–`b`.
 fn point_segment_dist(p: Vec2, a: Vec2, b: Vec2) -> f32 {
@@ -1010,17 +1006,26 @@ fn drag_begin_system(
     };
 
     let origin = obj_xf.translation();
+    let to_screen = |w: Vec3| cam.world_to_viewport(cam_xf, w).ok();
+
     // Hit-test each axis handle in screen space; pick the nearest within threshold.
     let mut best: Option<(GizmoAxis, f32)> = None;
     for axis in [GizmoAxis::X, GizmoAxis::Y, GizmoAxis::Z] {
-        let end = origin + axis.dir() * GIZMO_LEN;
-        let (Ok(a), Ok(b)) = (
-            cam.world_to_viewport(cam_xf, origin),
-            cam.world_to_viewport(cam_xf, end),
-        ) else {
-            continue;
+        let dist = match selection.mode {
+            GizmoMode::Rotate => {
+                // Distance to the projected ring (perpendicular to the axis).
+                circle_screen_dist(cursor, origin, axis.dir(), GIZMO_LEN, &to_screen)
+            }
+            _ => {
+                // Distance to the axis segment (translate / scale).
+                let (Some(a), Some(b)) =
+                    (to_screen(origin), to_screen(origin + axis.dir() * GIZMO_LEN))
+                else {
+                    continue;
+                };
+                point_segment_dist(cursor, a, b)
+            }
         };
-        let dist = point_segment_dist(cursor, a, b);
         if dist < HANDLE_PIXEL_THRESHOLD && best.map_or(true, |(_, bd)| dist < bd) {
             best = Some((axis, dist));
         }
@@ -1035,6 +1040,43 @@ fn drag_begin_system(
     drag.start_cursor = cursor;
     drag.start_transform = obj_xf.compute_transform();
     true
+}
+
+/// Minimum screen-space distance from `cursor` to a world circle of `radius`
+/// centered at `center` with normal `axis`, by sampling the circle.
+fn circle_screen_dist(
+    cursor: Vec2,
+    center: Vec3,
+    axis: Vec3,
+    radius: f32,
+    to_screen: &impl Fn(Vec3) -> Option<Vec2>,
+) -> f32 {
+    let rot = Quat::from_rotation_arc(Vec3::Z, axis.normalize());
+    const SAMPLES: usize = 48;
+    let mut prev: Option<Vec2> = None;
+    let mut min = f32::INFINITY;
+    let mut first: Option<Vec2> = None;
+    for i in 0..SAMPLES {
+        let t = i as f32 / SAMPLES as f32 * std::f32::consts::TAU;
+        let local = Vec3::new(t.cos() * radius, t.sin() * radius, 0.0);
+        let world = center + rot * local;
+        let Some(p) = to_screen(world) else {
+            prev = None;
+            continue;
+        };
+        if first.is_none() {
+            first = Some(p);
+        }
+        if let Some(a) = prev {
+            min = min.min(point_segment_dist(cursor, a, p));
+        }
+        prev = Some(p);
+    }
+    // Close the loop.
+    if let (Some(a), Some(b)) = (prev, first) {
+        min = min.min(point_segment_dist(cursor, a, b));
+    }
+    min
 }
 
 fn drag_update(

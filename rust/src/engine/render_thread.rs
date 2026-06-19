@@ -8,7 +8,7 @@ use bevy::image::Image;
 use bevy::prelude::*;
 
 use super::device::{self, build_app, SharedGpu};
-use crate::{gizmo, level, picking, viewport};
+use crate::{gizmo, level, picking, registry, viewport};
 
 /// Transform returned to Dart after a drag update so the inspector stays in sync.
 pub(crate) struct TransformOut {
@@ -46,6 +46,14 @@ pub(crate) enum RenderCmd {
     },
     /// Replace the scene contents (JSON serialized editor scene tree).
     SetScene { json: String },
+    /// Serialize the editor scene to a `.scn.ron` file at `path`.
+    SaveScene { path: String, reply: Sender<Result<(), String>> },
+    /// Load a `.scn`/`.scn.ron` file into the live world.
+    LoadScene { path: String, reply: Sender<Result<(), String>> },
+    /// Reply with JSON listing every registered component type (registry::list_component_types).
+    ListComponentTypes { reply: Sender<String> },
+    /// Reply with JSON describing one component type (registry::describe_component), or None if unknown.
+    DescribeComponent { type_path: String, reply: Sender<Option<String>> },
     /// Raycast from a viewport pixel; reply with the hit editor id (if any).
     Pick {
         image: AssetId<Image>,
@@ -163,6 +171,24 @@ pub(super) fn render_thread_main(ready_tx: Sender<Result<(), String>>) {
             }
             RenderCmd::SetScene { json } => {
                 level::rebuild_scene(&mut sub_apps, &json);
+            }
+            RenderCmd::SaveScene { path, reply } => {
+                let result = level::scene_file::save_scene(sub_apps.main.world_mut(), &path);
+                let _ = reply.send(result);
+            }
+            RenderCmd::LoadScene { path, reply } => {
+                let result = level::scene_file::load_scene(sub_apps.main.world_mut(), &path);
+                let _ = reply.send(result);
+            }
+            RenderCmd::ListComponentTypes { reply } => {
+                let world = sub_apps.main.world();
+                let type_registry = world.resource::<AppTypeRegistry>().read();
+                let _ = reply.send(registry::list_component_types(&type_registry));
+            }
+            RenderCmd::DescribeComponent { type_path, reply } => {
+                let world = sub_apps.main.world();
+                let type_registry = world.resource::<AppTypeRegistry>().read();
+                let _ = reply.send(registry::describe_component(&type_registry, &type_path));
             }
             RenderCmd::Pick { image, x, y, reply } => {
                 let id = picking::pick_entity(&mut sub_apps, image, Vec2::new(x, y));

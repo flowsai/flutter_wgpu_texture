@@ -130,6 +130,18 @@ pub(super) fn build_app() -> Result<(SubApps, SharedGpu), String> {
     app.init_resource::<picking::EditorSelection>();
     app.add_systems(Update, gizmo::draw::draw_editor_gizmos);
 
+    app.register_type::<crate::level::components::SceneObjectId>();
+    app.register_type::<crate::level::primitives::PrimitiveMesh>();
+    app.register_type::<crate::level::primitives::MaterialColor>();
+    app.add_systems(
+        Update,
+        (
+            crate::level::primitives::materialize_meshes,
+            crate::level::primitives::sync_material_colors,
+        )
+            .chain(),
+    );
+
     // Ambient light so faces not facing the directional light aren't pure black.
     app.insert_resource(bevy::light::GlobalAmbientLight {
         color: Color::WHITE,
@@ -153,7 +165,7 @@ pub(super) fn build_app() -> Result<(SubApps, SharedGpu), String> {
         config.line.width = 2.5;
     }
 
-    // Orbit camera state for the viewport (one viewport in v1).
+    // Orbit camera state for the viewport.
     app.world_mut().init_resource::<viewport::camera::OrbitCamera>();
     app.world_mut().init_resource::<gizmo::GizmoHover>();
     app.world_mut().init_resource::<gizmo::DragState>();

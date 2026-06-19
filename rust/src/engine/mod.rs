@@ -1,4 +1,4 @@
-//! Renderer registry + device context (≈ Flax Engine orchestration).
+//! Renderer registry + device context.
 //!
 //! The actual rendering is performed by Bevy on a dedicated thread (see
 //! `device`/`render_thread`). This module keeps the per-viewport handle
@@ -171,6 +171,47 @@ impl Renderer {
         let _ = device::send(RenderCmd::SetScene {
             json: json.to_string(),
         });
+    }
+
+    fn list_component_types(&mut self) -> Result<String, String> {
+        let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+        device::send(RenderCmd::ListComponentTypes { reply: reply_tx })?;
+        reply_rx
+            .recv()
+            .map_err(|_| "render thread dropped list_component_types reply".to_string())
+    }
+
+    fn describe_component(&mut self, type_path: &str) -> Result<Option<String>, String> {
+        let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+        device::send(RenderCmd::DescribeComponent {
+            type_path: type_path.to_string(),
+            reply: reply_tx,
+        })?;
+        reply_rx
+            .recv()
+            .map_err(|_| "render thread dropped describe_component reply".to_string())
+    }
+
+    fn save_scene(&mut self, path: &str) -> Result<(), String> {
+        let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+        device::send(RenderCmd::SaveScene {
+            path: path.to_string(),
+            reply: reply_tx,
+        })?;
+        reply_rx
+            .recv()
+            .map_err(|_| "render thread dropped save_scene reply".to_string())?
+    }
+
+    fn load_scene(&mut self, path: &str) -> Result<(), String> {
+        let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+        device::send(RenderCmd::LoadScene {
+            path: path.to_string(),
+            reply: reply_tx,
+        })?;
+        reply_rx
+            .recv()
+            .map_err(|_| "render thread dropped load_scene reply".to_string())?
     }
 
     /// Raycast a viewport pixel; returns the hit editor id (blocking).
@@ -405,6 +446,46 @@ pub(crate) fn set_scene(handle: u64, json: &str) -> Result<(), String> {
         .unwrap_or_else(|err| err.into_inner())
         .set_scene(json);
     Ok(())
+}
+
+pub(crate) fn list_component_types(handle: u64) -> Result<String, String> {
+    let renderer =
+        lookup_renderer(handle).ok_or_else(|| "renderer handle not found".to_string())?;
+    let result = renderer
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .list_component_types();
+    result
+}
+
+pub(crate) fn describe_component(handle: u64, type_path: &str) -> Result<Option<String>, String> {
+    let renderer =
+        lookup_renderer(handle).ok_or_else(|| "renderer handle not found".to_string())?;
+    let result = renderer
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .describe_component(type_path);
+    result
+}
+
+pub(crate) fn save_scene(handle: u64, path: &str) -> Result<(), String> {
+    let renderer =
+        lookup_renderer(handle).ok_or_else(|| "renderer handle not found".to_string())?;
+    let result = renderer
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .save_scene(path);
+    result
+}
+
+pub(crate) fn load_scene(handle: u64, path: &str) -> Result<(), String> {
+    let renderer =
+        lookup_renderer(handle).ok_or_else(|| "renderer handle not found".to_string())?;
+    let result = renderer
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .load_scene(path);
+    result
 }
 
 pub(crate) fn pick(handle: u64, x: f32, y: f32) -> Result<Option<String>, String> {

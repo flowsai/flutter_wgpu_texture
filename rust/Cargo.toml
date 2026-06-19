@@ -25,6 +25,7 @@ log = "0.4"
 ctor = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+ron = { version = "0.12", default-features = false }
 
 # Bevy is the renderer. default-features=false to stay headless (no winit window);
 # raw_vulkan_init lets us enable the DMA-BUF Vulkan device extensions at creation.
@@ -43,6 +44,8 @@ bevy = { path = "../../../bevy", default-features = false, features = [
   "mesh_picking",        # MeshRayCast SystemParam for viewport click-to-pick
   "bevy_gizmos",         # immediate-mode gizmo drawing (selection + transform handles)
   "bevy_gizmos_render",  # gizmo render pipeline into the offscreen Image camera
+  "bevy_world_serialization",
+  "serialize",
 ] }
 
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]

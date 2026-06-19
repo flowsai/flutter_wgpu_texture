@@ -75,6 +75,28 @@ void invokeCommand({
 void setScene({required BigInt handle, required String json}) =>
     RustLib.instance.api.crateApiSetScene(handle: handle, json: json);
 
+/// JSON listing every registered Bevy component type:
+/// `[ { "type_path": "...", "short_name": "..." }, ... ]`.
+String listComponentTypes({required BigInt handle}) =>
+    RustLib.instance.api.crateApiListComponentTypes(handle: handle);
+
+/// JSON field-level description of one component type, or null if the type path
+/// is not registered: `{ "type_path", "short_name", "kind", "fields": [ {
+/// "name", "type_path", "kind", "default" } ] }`.
+String? describeComponent({required BigInt handle, required String typePath}) =>
+    RustLib.instance.api.crateApiDescribeComponent(
+      handle: handle,
+      typePath: typePath,
+    );
+
+/// Serialize the editor scene to a native Bevy `.scn.ron` file at `path`.
+void saveScene({required BigInt handle, required String path}) =>
+    RustLib.instance.api.crateApiSaveScene(handle: handle, path: path);
+
+/// Load a native Bevy `.scn`/`.scn.ron` file into the live world.
+void loadScene({required BigInt handle, required String path}) =>
+    RustLib.instance.api.crateApiLoadScene(handle: handle, path: path);
+
 /// Raycast a viewport pixel; returns the hit entity's editor id (or null).
 String? pick({required BigInt handle, required double x, required double y}) =>
     RustLib.instance.api.crateApiPick(handle: handle, x: x, y: y);

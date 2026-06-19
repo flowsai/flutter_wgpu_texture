@@ -87,6 +87,33 @@ pub fn set_scene(handle: u64, json: String) -> Result<(), String> {
     engine::set_scene(handle, &json)
 }
 
+/// JSON listing every registered Bevy component type:
+/// `[ { "type_path": "...", "short_name": "..." }, ... ]`.
+#[frb(sync)]
+pub fn list_component_types(handle: u64) -> Result<String, String> {
+    engine::list_component_types(handle)
+}
+
+/// JSON field-level description of one component type, or null if the type path
+/// is not registered: `{ "type_path", "short_name", "kind", "fields": [ {
+/// "name", "type_path", "kind", "default" } ] }`.
+#[frb(sync)]
+pub fn describe_component(handle: u64, type_path: String) -> Result<Option<String>, String> {
+    engine::describe_component(handle, &type_path)
+}
+
+/// Serialize the editor scene to a native Bevy `.scn.ron` file at `path`.
+#[frb(sync)]
+pub fn save_scene(handle: u64, path: String) -> Result<(), String> {
+    engine::save_scene(handle, &path)
+}
+
+/// Load a native Bevy `.scn`/`.scn.ron` file into the live world.
+#[frb(sync)]
+pub fn load_scene(handle: u64, path: String) -> Result<(), String> {
+    engine::load_scene(handle, &path)
+}
+
 /// Raycast a viewport pixel; returns the hit entity's editor id (or null).
 #[frb(sync)]
 pub fn pick(handle: u64, x: f32, y: f32) -> Result<Option<String>, String> {

@@ -7,6 +7,8 @@
 use bevy::prelude::{Quat, Transform};
 use serde::Deserialize;
 
+use super::components::ComponentDef;
+
 #[derive(Debug, Deserialize)]
 pub struct SceneDoc {
     pub entities: Vec<SceneEntityDef>,
@@ -14,7 +16,7 @@ pub struct SceneDoc {
 
 #[derive(Debug, Deserialize)]
 pub struct SceneEntityDef {
-    /// Stable editor id — the join key between Dart `SceneEntity.id` and Bevy `Entity`.
+    /// Stable editor id — the join key with the `SceneObjectId` component.
     pub id: String,
     #[allow(dead_code)]
     pub name: String,
@@ -23,11 +25,18 @@ pub struct SceneEntityDef {
     /// `light:ambient` (cameras are viewport-owned; `light:ambient` maps to the
     /// global ambient resource, not a world entity).
     pub kind: String,
+    /// Parent entity id within this scene. None = root. Wired to `ChildOf` so
+    /// the child transform is relative to its parent.
+    #[serde(default)]
+    pub parent_id: Option<String>,
     pub transform: TransformDef,
     #[serde(default)]
     pub material: Option<MaterialDef>,
     #[serde(default)]
     pub light: Option<LightDef>,
+    /// Reflected add-on components, inserted via the `AppTypeRegistry`.
+    #[serde(default)]
+    pub components: Vec<ComponentDef>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -54,19 +63,18 @@ pub struct MaterialDef {
     pub color: [f32; 4],
 }
 
-/// Flattened union of all Bevy light fields (Flax-style: a single `brightness`
-/// multiplier + `color` per light, plus per-type shape fields). The entity's
-/// `kind` discriminates which component to spawn; fields not relevant to a kind
-/// are ignored. `brightness` maps to lux (directional) or lumens (point/spot/
-/// rect) in `light::spawn_light`, and to `GlobalAmbientLight.brightness` for
-/// ambient. See ADR d01-lightdef-tagged-enum.
+/// Flattened union of all Bevy light fields: a single `brightness` multiplier
+/// + `color` per light, plus per-type shape fields. The entity's `kind`
+/// discriminates which component to spawn; fields not relevant to a kind are
+/// ignored. `brightness` maps to lux (directional) or lumens (point/spot/rect)
+/// in `light::spawn_light`, and to `GlobalAmbientLight.brightness` for ambient.
 #[derive(Debug, Deserialize, Default)]
 pub struct LightDef {
     /// Linear RGBA in 0..1. Defaults to white when `None`.
     #[serde(default)]
     pub color: Option<[f32; 4]>,
 
-    /// Flax-style brightness multiplier (default 3.14). Mapped to Bevy units by
+    /// Brightness multiplier (default 3.14). Mapped to Bevy units by
     /// `light::spawn_light` / `apply_ambient_light`.
     #[serde(default)]
     pub brightness: Option<f32>,

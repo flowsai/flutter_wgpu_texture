@@ -1,11 +1,12 @@
-//! Scene/Level module (≈ Flax `Source/Engine/Level/`).
-//!
-//! Owns the live ECS scene built from the editor's scene tree. The editor pushes
-//! its whole tree as JSON via `set_scene`; `rebuild_scene` diffs it against the
-//! world (spawn / patch / despawn), keyed by stable editor ids via `EditorIdMap`.
-//! The editor camera is viewport-owned and never touched here. Light spawn/patch
-//! logic lives in the [`crate::light`] module.
+//! Scene/Level module: owns the live ECS scene built from the editor's scene
+//! tree. The editor pushes its whole tree as JSON via `set_scene`;
+//! `rebuild_scene` diffs it against the world (spawn / patch / despawn), keyed
+//! by stable editor ids. The editor camera is viewport-owned and never touched
+//! here. Light spawn/patch logic lives in the [`crate::light`] module.
 
+pub mod components;
+pub mod primitives;
+pub mod scene_file;
 pub mod schema;
 
 use std::collections::{HashMap, HashSet};
@@ -13,8 +14,10 @@ use std::collections::{HashMap, HashSet};
 use bevy::app::SubApps;
 use bevy::ecs::resource::Resource;
 use bevy::prelude::*;
+use bevy::reflect::TypeRegistry;
 
 use crate::light;
+use components::{spawn_components, SceneObjectId};
 use schema::{SceneDoc, SceneEntityDef};
 
 /// Maps the editor's stable string ids to live Bevy entities (both directions).
@@ -50,6 +53,11 @@ pub(crate) fn rebuild_scene(sub_apps: &mut SubApps, json: &str) {
         light::despawn_fallback(world);
     }
 
+    // Clone the AppTypeRegistry handle so the read guard borrows the Arc, not
+    // the world, and the world stays mutably usable.
+    let type_registry_arc = world.resource::<AppTypeRegistry>().clone();
+    let type_registry = type_registry_arc.read();
+
     let mut seen: HashSet<String> = HashSet::with_capacity(doc.entities.len());
 
     for def in &doc.entities {
@@ -74,22 +82,42 @@ pub(crate) fn rebuild_scene(sub_apps: &mut SubApps, json: &str) {
                     let mut map = world.resource_mut::<EditorIdMap>();
                     map.rev.remove(&entity);
                 }
-                let new_entity = spawn_entity(world, def);
+                let new_entity = spawn_entity(world, def, &type_registry);
                 let mut map = world.resource_mut::<EditorIdMap>();
                 map.fwd.insert(def.id.clone(), new_entity);
                 map.rev.insert(new_entity, def.id.clone());
             } else {
-                update_entity(world, entity, def);
+                update_entity(world, entity, def, &type_registry);
             }
         } else {
-            let entity = spawn_entity(world, def);
+            let entity = spawn_entity(world, def, &type_registry);
             let mut map = world.resource_mut::<EditorIdMap>();
             map.fwd.insert(def.id.clone(), entity);
             map.rev.insert(entity, def.id.clone());
         }
     }
 
-    // Despawn entities no longer present in the doc.
+    // Wire `ChildOf` from `parent_id` so child transforms are parent-relative.
+    let links: Vec<(Entity, Entity)> = {
+        let map = world.resource::<EditorIdMap>();
+        doc.entities
+            .iter()
+            .filter_map(|def| {
+                let parent_id = def.parent_id.as_ref()?;
+                let child = map.fwd.get(&def.id).copied()?;
+                let parent = map.fwd.get(parent_id).copied()?;
+                Some((child, parent))
+            })
+            .collect()
+    };
+    for (child, parent) in links {
+        if let Ok(mut e) = world.get_entity_mut(child) {
+            e.insert(ChildOf(parent));
+        }
+    }
+
+    // Despawn entities no longer present in the doc. `ChildOf` cascades
+    // despawn to children, so guard against already-despawned entities.
     let to_remove: Vec<(String, Entity)> = world
         .resource::<EditorIdMap>()
         .fwd
@@ -98,7 +126,9 @@ pub(crate) fn rebuild_scene(sub_apps: &mut SubApps, json: &str) {
         .map(|(id, e)| (id.clone(), *e))
         .collect();
     for (id, entity) in to_remove {
-        world.despawn(entity);
+        if world.get_entity_mut(entity).is_ok() {
+            world.despawn(entity);
+        }
         let mut map = world.resource_mut::<EditorIdMap>();
         map.fwd.remove(&id);
         map.rev.remove(&entity);
@@ -107,62 +137,63 @@ pub(crate) fn rebuild_scene(sub_apps: &mut SubApps, json: &str) {
 
 /// Spawn a brand-new entity from its editor definition. Returns the Bevy entity.
 /// Mesh kinds are handled inline; light kinds delegate to [`light::spawn_light`].
-fn spawn_entity(world: &mut World, def: &SceneEntityDef) -> Entity {
+/// Every entity also gets a [`SceneObjectId`], a `Name`, and its reflected
+/// add-on components.
+fn spawn_entity(world: &mut World, def: &SceneEntityDef, type_registry: &TypeRegistry) -> Entity {
     let transform = def.transform.to_bevy();
+    let id = SceneObjectId(def.id.clone());
+    let name = Name::new(def.name.clone());
 
-    match def.kind.as_str() {
+    let mut entity_world_mut = match def.kind.as_str() {
         "mesh:cube" | "mesh:plane" => {
-            let mesh = {
-                let mut meshes = world.resource_mut::<Assets<Mesh>>();
-                if def.kind == "mesh:plane" {
-                    meshes.add(Plane3d::default().mesh().size(10.0, 10.0))
-                } else {
-                    meshes.add(Cuboid::default())
-                }
-            };
+            let prim = if def.kind == "mesh:plane" { "plane" } else { "cube" };
             let color = def
                 .material
                 .as_ref()
                 .map(|m| m.color)
                 .unwrap_or([0.8, 0.8, 0.8, 1.0]);
-            let material = {
-                let mut materials = world.resource_mut::<Assets<StandardMaterial>>();
-                materials.add(StandardMaterial {
-                    base_color: Color::srgba(color[0], color[1], color[2], color[3]),
-                    ..default()
-                })
-            };
-            world
-                .spawn((Mesh3d(mesh), MeshMaterial3d(material), transform))
-                .id()
+            world.spawn((
+                transform,
+                primitives::PrimitiveMesh(prim.to_string()),
+                primitives::MaterialColor(color),
+            ))
         }
-        k if k.starts_with("light:") => light::spawn_light(world, def),
+        k if k.starts_with("light:") => {
+            let entity = light::spawn_light(world, def);
+            world.entity_mut(entity)
+        }
         other => {
             warn!("set_scene: unknown entity kind '{other}', spawning empty");
-            world.spawn(transform).id()
+            world.spawn(transform)
         }
-    }
+    };
+
+    entity_world_mut.insert((id, name));
+    spawn_components(&mut entity_world_mut, &def.components, type_registry);
+    entity_world_mut.id()
 }
 
-/// Patch an existing mesh entity's transform and material color.
-/// Lights are respawned by `rebuild_scene` (kind/field changes), not patched here.
-fn update_entity(world: &mut World, entity: Entity, def: &SceneEntityDef) {
+/// Patch an existing entity's transform, material color, and reflected add-on
+/// components. Lights are respawned by `rebuild_scene`, not patched here.
+/// Re-parenting is handled by the hierarchy pass in `rebuild_scene`.
+fn update_entity(world: &mut World, entity: Entity, def: &SceneEntityDef, type_registry: &TypeRegistry) {
     if let Some(mut t) = world.get_mut::<Transform>(entity) {
         *t = def.transform.to_bevy();
     }
 
-    if let (Some(mat_def), Some(handle)) = (
-        def.material.as_ref(),
-        world
-            .get::<MeshMaterial3d<StandardMaterial>>(entity)
-            .map(|m| m.0.clone()),
-    ) {
+    if let Some(mat_def) = def.material.as_ref() {
         let c = mat_def.color;
-        if let Some(mut material) = world
-            .resource_mut::<Assets<StandardMaterial>>()
-            .get_mut(&handle)
-        {
-            material.base_color = Color::srgba(c[0], c[1], c[2], c[3]);
+        if let Some(mut mc) = world.get_mut::<primitives::MaterialColor>(entity) {
+            mc.0 = c;
+        } else {
+            world.entity_mut(entity).insert(primitives::MaterialColor(c));
+        }
+    }
+
+    // Re-apply arbitrary reflected components (replace by re-inserting).
+    if !def.components.is_empty() {
+        if let Ok(mut entity_world_mut) = world.get_entity_mut(entity) {
+            spawn_components(&mut entity_world_mut, &def.components, type_registry);
         }
     }
 }
@@ -185,28 +216,15 @@ pub(crate) fn ensure_default_scene(sub_apps: &mut SubApps) {
     }
     world.insert_resource(DefaultSceneSpawned);
 
-    let mut meshes = world.resource_mut::<Assets<Mesh>>();
-    let cube = meshes.add(Cuboid::default());
-    let plane = meshes.add(Plane3d::default().mesh().size(10.0, 10.0));
-    let mut materials = world.resource_mut::<Assets<StandardMaterial>>();
-    let cube_mat = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.4, 0.6, 0.9),
-        ..default()
-    });
-    let plane_mat = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.3, 0.3, 0.3),
-        ..default()
-    });
-
     world.spawn((
-        Mesh3d(cube),
-        MeshMaterial3d(cube_mat),
+        primitives::PrimitiveMesh("cube".to_string()),
+        primitives::MaterialColor([0.4, 0.6, 0.9, 1.0]),
         Transform::from_xyz(0.0, 0.5, 0.0),
         light::FallbackMarker,
     ));
     world.spawn((
-        Mesh3d(plane),
-        MeshMaterial3d(plane_mat),
+        primitives::PrimitiveMesh("plane".to_string()),
+        primitives::MaterialColor([0.3, 0.3, 0.3, 1.0]),
         Transform::default(),
         light::FallbackMarker,
     ));

@@ -8,6 +8,7 @@ mod light;
 mod linux_dma_buf;
 mod picking;
 mod present;
+mod registry;
 mod viewport;
 
 // Re-export FRB boilerplate symbols so a combined workspace cdylib can pull

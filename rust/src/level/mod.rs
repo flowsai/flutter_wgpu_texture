@@ -5,6 +5,8 @@
 //! here. Light spawn/patch logic lives in the [`crate::light`] module.
 
 pub mod components;
+pub mod physics;
+pub mod play;
 pub mod primitives;
 pub mod scene_file;
 pub mod schema;
@@ -220,7 +222,7 @@ pub(crate) fn ensure_default_scene(sub_apps: &mut SubApps) {
     world.spawn((
         primitives::PrimitiveMesh("cube".to_string()),
         primitives::MaterialColor([0.4, 0.6, 0.9, 1.0]),
-        Transform::from_xyz(0.0, 0.5, 0.0),
+        Transform::from_xyz(0.0, 6.0, 0.0),
         light::FallbackMarker,
     ));
     world.spawn((

@@ -2,6 +2,7 @@
 
 use bevy::ecs::reflect::ReflectComponent;
 use bevy::prelude::*;
+use bevy::reflect::enums::{DynamicEnum, DynamicVariant};
 use bevy::reflect::structs::DynamicStruct;
 use bevy::reflect::tuple_struct::DynamicTupleStruct;
 use bevy::reflect::{TypeInfo, TypeRegistry};
@@ -89,6 +90,17 @@ fn json_to_reflect(value: &Value, info: &'static TypeInfo) -> Option<Box<dyn Par
             }
             Some(Box::new(dyn_ts))
         }
+        TypeInfo::Enum(e) => {
+            // Unit variants are authored as the variant name string.
+            let name = value.as_str()?;
+            if !e.iter().any(|v| v.name() == name) {
+                return None;
+            }
+            let mut dyn_enum = DynamicEnum::default();
+            dyn_enum.set_represented_type(Some(info));
+            dyn_enum.set_variant(name, DynamicVariant::Unit);
+            Some(Box::new(dyn_enum))
+        }
         TypeInfo::Opaque(_) => json_to_opaque(value, info.type_path()),
         _ => None,
     }
@@ -120,6 +132,32 @@ mod tests {
     struct Foo {
         x: f32,
         name: String,
+    }
+
+    #[test]
+    fn spawns_component_with_unit_enum_field() {
+        use crate::level::physics::{BodyType, ColliderShape, RigidBodyDef};
+
+        let mut world = World::new();
+        let atr = AppTypeRegistry::default();
+        atr.write().register::<RigidBodyDef>();
+        world.insert_resource(atr);
+        let type_registry = world.resource::<AppTypeRegistry>().clone();
+        let guard = type_registry.read();
+
+        let mut fields = Map::new();
+        fields.insert("body".to_string(), Value::from("Static"));
+        fields.insert("collider".to_string(), Value::from("HalfSpace"));
+        let comp = ComponentDef {
+            type_path: std::any::type_name::<RigidBodyDef>().to_string(),
+            fields,
+        };
+
+        let mut entity = world.spawn(());
+        spawn_components(&mut entity, &[comp], &guard);
+        let got = entity.get::<RigidBodyDef>().expect("RigidBodyDef not inserted");
+        assert_eq!(got.body, BodyType::Static);
+        assert_eq!(got.collider, ColliderShape::HalfSpace);
     }
 
     #[test]

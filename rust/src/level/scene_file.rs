@@ -29,8 +29,9 @@ fn scene_component_filter() -> WorldFilter {
         .deny::<MeshMaterial3d<StandardMaterial>>()
 }
 
-/// Serialize the editor scene (entities with a `SceneObjectId`) to `.scn.ron`.
-pub fn save_scene(world: &mut World, path: &str) -> Result<(), String> {
+/// Serialize the editor scene (entities with a `SceneObjectId`) to a `.scn.ron`
+/// string.
+pub fn serialize_scene(world: &mut World) -> Result<String, String> {
     let type_registry_arc = world.resource::<AppTypeRegistry>().clone();
     let type_registry = type_registry_arc.read();
 
@@ -44,7 +45,26 @@ pub fn save_scene(world: &mut World, path: &str) -> Result<(), String> {
         .with_component_filter(scene_component_filter())
         .build();
 
-    let ron = dynamic.serialize(&type_registry).map_err(|e| e.to_string())?;
+    dynamic.serialize(&type_registry).map_err(|e| e.to_string())
+}
+
+/// Restore a scene from a `.scn.ron` string into the live world, replacing the
+/// current scene entities and rebuilding the `EditorIdMap`.
+pub fn restore_scene(world: &mut World, ron: &str) -> Result<(), String> {
+    let type_registry_arc = world.resource::<AppTypeRegistry>().clone();
+    let type_registry = type_registry_arc.read();
+
+    let dynamic = {
+        let asset_server = world.resource::<AssetServer>();
+        let mut lfp: &AssetServer = &*asset_server;
+        load_dynamic_world(ron.as_bytes(), &type_registry, &mut lfp)?
+    };
+    spawn_dynamic_world(world, &dynamic, &type_registry)
+}
+
+/// Serialize the editor scene (entities with a `SceneObjectId`) to `.scn.ron`.
+pub fn save_scene(world: &mut World, path: &str) -> Result<(), String> {
+    let ron = serialize_scene(world)?;
     std::fs::write(path, ron).map_err(|e| e.to_string())
 }
 

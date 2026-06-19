@@ -5,6 +5,7 @@ use bevy::camera::primitives::Aabb;
 use bevy::prelude::*;
 
 use super::{DragState, GizmoAxis, GizmoHover, GizmoMode};
+use crate::level::play::PlayState;
 use crate::picking::EditorSelection;
 
 /// Draw the selection outline + transform gizmo for the selected entity.
@@ -14,6 +15,7 @@ use crate::picking::EditorSelection;
 /// `PostUpdate`, i.e. one frame late) so the outline tracks the mesh with no lag.
 /// For root entities (our scene) local == world.
 pub(crate) fn draw_editor_gizmos(
+    play_state: Option<Res<PlayState>>,
     selection: Res<EditorSelection>,
     hover: Option<Res<GizmoHover>>,
     drag: Option<Res<DragState>>,
@@ -21,6 +23,10 @@ pub(crate) fn draw_editor_gizmos(
     aabbs: Query<&Aabb>,
     mut gizmos: Gizmos,
 ) {
+    // Editor gizmos are hidden while playing.
+    if play_state.map(|s| s.is_playing()).unwrap_or(false) {
+        return;
+    }
     let Some(entity) = selection.selected else {
         return;
     };

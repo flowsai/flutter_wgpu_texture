@@ -125,6 +125,10 @@ pub(super) fn build_app() -> Result<(SubApps, SharedGpu), String> {
             }),
     );
 
+    // Physics. The simulation clock starts paused so bodies stay inert while
+    // editing; entering play unpauses it.
+    app.add_plugins(avian3d::PhysicsPlugins::default());
+
     // Gizmos for selection outline + transform handles. GizmoPlugin is already
     // in DefaultPlugins (via the `bevy_gizmos` feature); just add our draw system.
     app.init_resource::<picking::EditorSelection>();
@@ -133,6 +137,7 @@ pub(super) fn build_app() -> Result<(SubApps, SharedGpu), String> {
     app.register_type::<crate::level::components::SceneObjectId>();
     app.register_type::<crate::level::primitives::PrimitiveMesh>();
     app.register_type::<crate::level::primitives::MaterialColor>();
+    app.register_type::<crate::level::physics::RigidBodyDef>();
     app.add_systems(
         Update,
         (
@@ -155,6 +160,9 @@ pub(super) fn build_app() -> Result<(SubApps, SharedGpu), String> {
     }
     app.finish();
     app.cleanup();
+
+    // Start in editing mode: physics is set up but does not step until play.
+    crate::level::physics::pause_simulation(app.world_mut());
 
     // Make gizmos draw on top of geometry (selection outline always visible).
     {

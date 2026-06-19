@@ -132,6 +132,13 @@ pub fn set_gizmo_mode(handle: u64, mode: String) -> Result<(), String> {
     engine::set_gizmo_mode(handle, &mode)
 }
 
+/// Switch the editor play mode: "play" enters play mode (snapshots the scene,
+/// hides editor gizmos), "edit" returns to editing (restores the snapshot).
+#[frb(sync)]
+pub fn set_play_mode(handle: u64, mode: String) -> Result<(), String> {
+    engine::set_play_mode(handle, &mode)
+}
+
 // ── Camera navigation (Unity-style; deltas are render-target pixels) ──────────
 
 /// Orbit the camera around its focus point (Alt+LMB drag).

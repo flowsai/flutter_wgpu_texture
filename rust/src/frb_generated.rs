@@ -38,7 +38,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.12.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 8055223;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -169049545;
 
 // Section: executor
 
@@ -972,6 +972,37 @@ fn wire__crate__api__set_hover_impl(
         },
     )
 }
+fn wire__crate__api__set_play_mode_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "set_play_mode",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_handle = <u64>::sse_decode(&mut deserializer);
+            let api_mode = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, String>((move || {
+                let output_ok = crate::api::set_play_mode(api_handle, api_mode)?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
 fn wire__crate__api__set_scene_impl(
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
@@ -1331,10 +1362,11 @@ fn pde_ffi_dispatcher_sync_impl(
         27 => wire__crate__api__set_float_param_impl(ptr, rust_vec_len, data_len),
         28 => wire__crate__api__set_gizmo_mode_impl(ptr, rust_vec_len, data_len),
         29 => wire__crate__api__set_hover_impl(ptr, rust_vec_len, data_len),
-        30 => wire__crate__api__set_scene_impl(ptr, rust_vec_len, data_len),
-        31 => wire__crate__api__set_vec4_param_impl(ptr, rust_vec_len, data_len),
-        32 => wire__crate__api__start_animation_impl(ptr, rust_vec_len, data_len),
-        33 => wire__crate__api__stop_animation_impl(ptr, rust_vec_len, data_len),
+        30 => wire__crate__api__set_play_mode_impl(ptr, rust_vec_len, data_len),
+        31 => wire__crate__api__set_scene_impl(ptr, rust_vec_len, data_len),
+        32 => wire__crate__api__set_vec4_param_impl(ptr, rust_vec_len, data_len),
+        33 => wire__crate__api__start_animation_impl(ptr, rust_vec_len, data_len),
+        34 => wire__crate__api__stop_animation_impl(ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }

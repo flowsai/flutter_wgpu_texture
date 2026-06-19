@@ -238,6 +238,12 @@ impl Renderer {
         });
     }
 
+    fn set_play_mode(&mut self, mode: &str) {
+        let _ = device::send(RenderCmd::SetPlayMode {
+            mode: mode.to_string(),
+        });
+    }
+
     fn camera_orbit(&mut self, dx: f32, dy: f32) {
         let _ = device::send(RenderCmd::CameraOrbit {
             image: self.viewport_image,
@@ -515,6 +521,16 @@ pub(crate) fn set_gizmo_mode(handle: u64, mode: &str) -> Result<(), String> {
         .lock()
         .unwrap_or_else(|err| err.into_inner())
         .set_gizmo_mode(mode);
+    Ok(())
+}
+
+pub(crate) fn set_play_mode(handle: u64, mode: &str) -> Result<(), String> {
+    let renderer =
+        lookup_renderer(handle).ok_or_else(|| "renderer handle not found".to_string())?;
+    renderer
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .set_play_mode(mode);
     Ok(())
 }
 

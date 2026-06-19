@@ -109,6 +109,11 @@ void selectEntity({required BigInt handle, String? id}) =>
 void setGizmoMode({required BigInt handle, required String mode}) =>
     RustLib.instance.api.crateApiSetGizmoMode(handle: handle, mode: mode);
 
+/// Switch the editor play mode: "play" enters play mode (snapshots the scene,
+/// hides editor gizmos), "edit" returns to editing (restores the snapshot).
+void setPlayMode({required BigInt handle, required String mode}) =>
+    RustLib.instance.api.crateApiSetPlayMode(handle: handle, mode: mode);
+
 /// Orbit the camera around its focus point (Alt+LMB drag).
 void cameraOrbit({
   required BigInt handle,

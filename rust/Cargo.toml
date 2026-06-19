@@ -48,6 +48,30 @@ bevy = { path = "../../../bevy", default-features = false, features = [
   "serialize",
 ] }
 
+# Physics. Pinned to the local avian fork ported to Bevy 0.19; the patch table
+# below redirects avian's Bevy crates (and its helper crates) to the same local
+# Bevy this crate builds against, so the whole graph resolves to one Bevy.
+avian3d = { path = "../../../avian/crates/avian3d", default-features = false, features = [
+  "3d",
+  "f32",
+  "parry-f32",
+  "default-collider",
+] }
+
+[patch.crates-io]
+bevy = { path = "../../../bevy" }
+bevy_math = { path = "../../../bevy/crates/bevy_math" }
+bevy_reflect = { path = "../../../bevy/crates/bevy_reflect" }
+
+[patch."https://github.com/avianphysics/bevy_heavy"]
+bevy_heavy = { path = "../../../bevy_heavy" }
+
+[patch."https://github.com/Jondolf/bevy_transform_interpolation"]
+bevy_transform_interpolation = { path = "../../../bevy_transform_interpolation" }
+
+[patch."https://github.com/Jondolf/glam_matrix_extras"]
+glam_matrix_extras = { path = "../../../glam_matrix_extras" }
+
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
 wgpu-hal = { version = "=29.0.3", features = ["metal"] }
 metal = "0.27.0"

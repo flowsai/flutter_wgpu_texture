@@ -138,6 +138,14 @@ pub(super) fn build_app() -> Result<(SubApps, SharedGpu), String> {
     app.register_type::<crate::level::primitives::PrimitiveMesh>();
     app.register_type::<crate::level::primitives::MaterialColor>();
     app.register_type::<crate::level::physics::RigidBodyDef>();
+
+    // Light components derive Reflect but are not registered by their plugin, so
+    // register them here; otherwise they are dropped from the scene snapshot and
+    // lights vanish when the snapshot is restored on stopping play.
+    app.register_type::<DirectionalLight>();
+    app.register_type::<PointLight>();
+    app.register_type::<SpotLight>();
+    app.register_type::<bevy::light::RectLight>();
     app.add_systems(
         Update,
         (

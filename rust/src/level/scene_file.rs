@@ -118,11 +118,17 @@ pub fn spawn_dynamic_world(
         .iter(world)
         .map(|(e, s)| (e, s.0.clone()))
         .collect();
-    let mut map = world.resource_mut::<EditorIdMap>();
-    for (entity, id) in ids {
-        map.fwd.insert(id.clone(), entity);
-        map.rev.insert(entity, id);
+    {
+        let mut map = world.resource_mut::<EditorIdMap>();
+        for (entity, id) in ids {
+            map.fwd.insert(id.clone(), entity);
+            map.rev.insert(entity, id);
+        }
     }
+
+    // Deserialized lights carry only their reflected component; recreate the
+    // editor gizmo + picker proxy that are not stored in the scene.
+    crate::light::reestablish_light_proxies(world);
     Ok(())
 }
 
@@ -176,10 +182,40 @@ mod tests {
             w.register::<ChildOf>();
             w.register::<crate::level::primitives::PrimitiveMesh>();
             w.register::<crate::level::primitives::MaterialColor>();
+            w.register::<DirectionalLight>();
         }
         world.insert_resource(atr);
         world.init_resource::<EditorIdMap>();
         world
+    }
+
+    #[test]
+    fn round_trips_a_registered_light() {
+        let mut world = world_with_registry();
+        world.spawn((
+            SceneObjectId("sun".to_string()),
+            Name::new("Sun"),
+            Transform::from_xyz(3.0, 8.0, 5.0),
+            DirectionalLight {
+                illuminance: 12_000.0,
+                ..default()
+            },
+        ));
+
+        let ron = serialize_scene(&mut world).expect("serialize");
+
+        let mut dst = world_with_registry();
+        let type_registry = dst.resource::<AppTypeRegistry>().clone();
+        let guard = type_registry.read();
+        let mut load = NoOpLoad;
+        let dynamic = load_dynamic_world(ron.as_bytes(), &guard, &mut load).expect("deserialize");
+        spawn_dynamic_world(&mut dst, &dynamic, &guard).expect("spawn");
+
+        let sun = dst.resource::<EditorIdMap>().fwd["sun"];
+        let light = dst
+            .get::<DirectionalLight>(sun)
+            .expect("light component survives the round-trip");
+        assert_eq!(light.illuminance, 12_000.0);
     }
 
     #[test]

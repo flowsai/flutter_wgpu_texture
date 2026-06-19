@@ -170,6 +170,37 @@ fn spawn_light_proxy(world: &mut World, light: Entity) {
     });
 }
 
+/// Re-attach the editor gizmo + picker proxy to light entities that lack them.
+/// Lights brought in by the scene deserializer carry only their reflected light
+/// component; the proxy child and `ShowLightGizmo` are editor-side and not part
+/// of the scene, so they must be recreated when a scene is loaded or restored.
+pub(crate) fn reestablish_light_proxies(world: &mut World) {
+    // The proxy needs mesh + material storages; without them (headless tests)
+    // there is nothing to draw, so skip.
+    if !world.contains_resource::<Assets<Mesh>>()
+        || !world.contains_resource::<Assets<StandardMaterial>>()
+    {
+        return;
+    }
+    let lights: Vec<Entity> = world
+        .query_filtered::<Entity, Or<(
+            With<DirectionalLight>,
+            With<PointLight>,
+            With<SpotLight>,
+            With<RectLight>,
+        )>>()
+        .iter(world)
+        .collect();
+    for light in lights {
+        let has_proxy = world.get::<Children>(light).is_some_and(|c| !c.is_empty());
+        if has_proxy {
+            continue;
+        }
+        world.entity_mut(light).insert(ShowLightGizmo::default());
+        spawn_light_proxy(world, light);
+    }
+}
+
 /// A `DirectionalLight`/`SpotLight` shines along its local -Z (rotation), not
 /// its position. If the editor gives an (almost) identity rotation, aim it at
 /// the scene origin so default lights actually illuminate the cube at the

@@ -139,6 +139,12 @@ pub fn set_play_mode(handle: u64, mode: String) -> Result<(), String> {
     engine::set_play_mode(handle, &mode)
 }
 
+/// Switch the viewport view mode: "Lit" | "Unlit" | "Wireframe".
+#[frb(sync)]
+pub fn set_view_mode(handle: u64, mode: String) -> Result<(), String> {
+    engine::set_view_mode(handle, &mode)
+}
+
 // ── Camera navigation (Unity-style; deltas are render-target pixels) ──────────
 
 /// Orbit the camera around its focus point (Alt+LMB drag).

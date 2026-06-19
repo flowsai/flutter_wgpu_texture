@@ -10,6 +10,7 @@ pub mod play;
 pub mod primitives;
 pub mod scene_file;
 pub mod schema;
+pub mod view_mode;
 
 use std::collections::{HashMap, HashSet};
 

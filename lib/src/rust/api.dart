@@ -114,6 +114,10 @@ void setGizmoMode({required BigInt handle, required String mode}) =>
 void setPlayMode({required BigInt handle, required String mode}) =>
     RustLib.instance.api.crateApiSetPlayMode(handle: handle, mode: mode);
 
+/// Switch the viewport view mode: "Lit" | "Unlit" | "Wireframe".
+void setViewMode({required BigInt handle, required String mode}) =>
+    RustLib.instance.api.crateApiSetViewMode(handle: handle, mode: mode);
+
 /// Orbit the camera around its focus point (Alt+LMB drag).
 void cameraOrbit({
   required BigInt handle,

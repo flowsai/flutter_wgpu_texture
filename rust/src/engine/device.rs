@@ -129,6 +129,9 @@ pub(super) fn build_app() -> Result<(SubApps, SharedGpu), String> {
     // editing; entering play unpauses it.
     app.add_plugins(avian3d::PhysicsPlugins::default());
 
+    // Wireframe overlay (toggled by set_view_mode("Wireframe")).
+    app.add_plugins(bevy::pbr::wireframe::WireframePlugin::default());
+
     // Gizmos for selection outline + transform handles. GizmoPlugin is already
     // in DefaultPlugins (via the `bevy_gizmos` feature); just add our draw system.
     app.init_resource::<picking::EditorSelection>();

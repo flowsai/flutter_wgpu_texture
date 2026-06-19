@@ -174,16 +174,7 @@ mod tests {
     fn world_with_registry() -> World {
         let mut world = World::new();
         let atr = AppTypeRegistry::default();
-        {
-            let mut w = atr.write();
-            w.register::<SceneObjectId>();
-            w.register::<Transform>();
-            w.register::<Name>();
-            w.register::<ChildOf>();
-            w.register::<crate::level::primitives::PrimitiveMesh>();
-            w.register::<crate::level::primitives::MaterialColor>();
-            w.register::<DirectionalLight>();
-        }
+        crate::level::register_scene_types(&mut atr.write());
         world.insert_resource(atr);
         world.init_resource::<EditorIdMap>();
         world

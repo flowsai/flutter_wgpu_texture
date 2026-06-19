@@ -22,6 +22,25 @@ use crate::light;
 use components::{spawn_components, SceneObjectId};
 use schema::{SceneDoc, SceneEntityDef};
 
+/// Register every component type that may appear on a scene entity, so the
+/// scene snapshot (`scene_file::serialize_scene`) captures it. Types not in the
+/// registry are silently dropped from the snapshot. `Transform`/`Name`/`ChildOf`
+/// and the light types are NOT registered by their Bevy plugins, so they are
+/// registered here alongside the editor's own components.
+pub(crate) fn register_scene_types(registry: &mut TypeRegistry) {
+    registry.register::<SceneObjectId>();
+    registry.register::<primitives::PrimitiveMesh>();
+    registry.register::<primitives::MaterialColor>();
+    registry.register::<physics::RigidBodyDef>();
+    registry.register::<Transform>();
+    registry.register::<Name>();
+    registry.register::<ChildOf>();
+    registry.register::<DirectionalLight>();
+    registry.register::<PointLight>();
+    registry.register::<SpotLight>();
+    registry.register::<bevy::light::RectLight>();
+}
+
 /// Maps the editor's stable string ids to live Bevy entities (both directions).
 #[derive(Resource, Default)]
 pub(crate) struct EditorIdMap {

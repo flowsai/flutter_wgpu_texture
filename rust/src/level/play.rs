@@ -104,23 +104,19 @@ pub(crate) fn set_play_mode(world: &mut World, mode: &str) {
 mod tests {
     use super::*;
     use crate::level::components::SceneObjectId;
-    use crate::level::EditorIdMap;
+    use crate::level::{register_scene_types, EditorIdMap};
     use bevy::asset::AssetPlugin;
     use bevy::ecs::reflect::AppTypeRegistry;
 
+    // Seed the registry the same way the running app does, so the snapshot
+    // captures exactly what production captures (catches missing registrations).
     fn test_world() -> World {
         // AssetServer is required by restore_scene's deserialize path.
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, AssetPlugin::default()));
         let world = app.world_mut();
         let atr = world.get_resource_or_init::<AppTypeRegistry>().clone();
-        {
-            let mut w = atr.write();
-            w.register::<SceneObjectId>();
-            w.register::<Transform>();
-            w.register::<Name>();
-            w.register::<ChildOf>();
-        }
+        register_scene_types(&mut atr.write());
         world.init_resource::<EditorIdMap>();
         std::mem::take(world)
     }
@@ -153,5 +149,26 @@ mod tests {
             5.0,
             "authored transform restored on stop"
         );
+    }
+
+    #[test]
+    fn lights_stay_constant_across_play_cycles() {
+        let mut world = test_world();
+        world.spawn((
+            SceneObjectId("sun".to_string()),
+            Name::new("Sun"),
+            Transform::from_xyz(3.0, 8.0, 5.0),
+            DirectionalLight::default(),
+        ));
+
+        for _ in 0..5 {
+            enter_play(&mut world);
+            exit_play(&mut world);
+            let count = world
+                .query_filtered::<(), With<DirectionalLight>>()
+                .iter(&world)
+                .count();
+            assert_eq!(count, 1, "exactly one light after each play/stop cycle");
+        }
     }
 }

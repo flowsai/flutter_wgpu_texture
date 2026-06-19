@@ -134,18 +134,13 @@ pub(super) fn build_app() -> Result<(SubApps, SharedGpu), String> {
     app.init_resource::<picking::EditorSelection>();
     app.add_systems(Update, gizmo::draw::draw_editor_gizmos);
 
-    app.register_type::<crate::level::components::SceneObjectId>();
-    app.register_type::<crate::level::primitives::PrimitiveMesh>();
-    app.register_type::<crate::level::primitives::MaterialColor>();
-    app.register_type::<crate::level::physics::RigidBodyDef>();
-
-    // Light components derive Reflect but are not registered by their plugin, so
-    // register them here; otherwise they are dropped from the scene snapshot and
-    // lights vanish when the snapshot is restored on stopping play.
-    app.register_type::<DirectionalLight>();
-    app.register_type::<PointLight>();
-    app.register_type::<SpotLight>();
-    app.register_type::<bevy::light::RectLight>();
+    // Register every type that may live on a scene entity so the play snapshot
+    // captures it. Several of these (Transform, Name, ChildOf, the light types)
+    // are not registered by their Bevy plugins.
+    {
+        let registry = app.world().resource::<AppTypeRegistry>().clone();
+        crate::level::register_scene_types(&mut registry.write());
+    }
     app.add_systems(
         Update,
         (

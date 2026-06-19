@@ -35,6 +35,10 @@ const POINT_SCALE: f32 = 320_000.0;
 #[derive(Component)]
 pub struct FallbackMarker;
 
+/// Marker on a light's viewport-marker mesh child, so it can be hidden in play.
+#[derive(Component)]
+pub struct LightProxy;
+
 pub(crate) fn brightness_to_illuminance(b: f32) -> f32 {
     (b * DIR_SCALE).max(0.0)
 }
@@ -166,8 +170,32 @@ fn spawn_light_proxy(world: &mut World, light: Entity) {
             MeshMaterial3d(material),
             bevy::light::NotShadowCaster,
             Transform::default(),
+            LightProxy,
         ));
     });
+}
+
+/// Show or hide all editor overlays for lights: the per-type direction/shape
+/// gizmos (`ShowLightGizmo`, drawn by Bevy) and the marker-mesh proxies. Hidden
+/// while playing so the viewport shows only the game, like Flax/Unity.
+pub(crate) fn set_light_overlays_visible(world: &mut World, visible: bool) {
+    {
+        use bevy::gizmos::config::GizmoConfigStore;
+        // The gizmo store is absent in headless tests.
+        if let Some(mut store) = world.get_resource_mut::<GizmoConfigStore>() {
+            store.config_mut::<LightGizmoConfigGroup>().0.enabled = visible;
+        }
+    }
+    let proxies: Vec<Entity> = world
+        .query_filtered::<Entity, With<LightProxy>>()
+        .iter(world)
+        .collect();
+    let vis = if visible { Visibility::Inherited } else { Visibility::Hidden };
+    for proxy in proxies {
+        if let Ok(mut e) = world.get_entity_mut(proxy) {
+            e.insert(vis);
+        }
+    }
 }
 
 /// Re-attach the editor gizmo + picker proxy to light entities that lack them.

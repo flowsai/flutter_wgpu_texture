@@ -59,6 +59,7 @@ pub(crate) fn enter_play(world: &mut World) {
             }
             physics::attach_play_bodies(world);
             physics::resume_simulation(world);
+            crate::light::set_light_overlays_visible(world, false);
             world.trigger(PlayLifecycle::Begin);
         }
         Err(e) => warn!("enter_play: failed to snapshot scene: {e}"),
@@ -91,6 +92,7 @@ pub(crate) fn exit_play(world: &mut World) {
     }
 
     restore_selection(world, selected_id);
+    crate::light::set_light_overlays_visible(world, true);
     world.resource_mut::<PlayState>().mode = PlayMode::Editing;
     world.trigger(PlayLifecycle::End);
 }

@@ -62,6 +62,27 @@ pub fn restore_scene(world: &mut World, ron: &str) -> Result<(), String> {
     spawn_dynamic_world(world, &dynamic, &type_registry)
 }
 
+/// Despawn entities that were spawned during play and are not part of the
+/// authored scene: renderable entities (those with a `Transform`) that carry no
+/// `SceneObjectId` and are not the editor's viewport camera. The authored scene
+/// (entities with a `SceneObjectId`) is left for [`restore_scene`] to replace.
+pub fn despawn_play_spawned(world: &mut World) {
+    let to_despawn: Vec<Entity> = world
+        .query_filtered::<Entity, (
+            With<Transform>,
+            Without<SceneObjectId>,
+            Without<Camera3d>,
+            Without<ChildOf>,
+        )>()
+        .iter(world)
+        .collect();
+    for entity in to_despawn {
+        if world.get_entity_mut(entity).is_ok() {
+            world.despawn(entity);
+        }
+    }
+}
+
 /// Serialize the editor scene (entities with a `SceneObjectId`) to `.scn.ron`.
 pub fn save_scene(world: &mut World, path: &str) -> Result<(), String> {
     let ron = serialize_scene(world)?;

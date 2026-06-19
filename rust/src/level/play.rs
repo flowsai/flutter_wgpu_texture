@@ -31,6 +31,17 @@ impl PlayState {
     }
 }
 
+/// Play lifecycle phases, triggered around the enter/exit sequence so gameplay
+/// systems can initialize and tear down. `Beginning`/`Ending` fire before the
+/// scene is set up / torn down; `Begin`/`End` fire after.
+#[derive(Event, Clone, Copy, Debug)]
+pub(crate) enum PlayLifecycle {
+    Beginning,
+    Begin,
+    Ending,
+    End,
+}
+
 /// Enter play mode: snapshot the authored scene and switch to `Playing`.
 /// A no-op if already playing.
 pub(crate) fn enter_play(world: &mut World) {
@@ -38,6 +49,7 @@ pub(crate) fn enter_play(world: &mut World) {
     if world.resource::<PlayState>().is_playing() {
         return;
     }
+    world.trigger(PlayLifecycle::Beginning);
     match scene_file::serialize_scene(world) {
         Ok(snapshot) => {
             {
@@ -47,6 +59,7 @@ pub(crate) fn enter_play(world: &mut World) {
             }
             physics::attach_play_bodies(world);
             physics::resume_simulation(world);
+            world.trigger(PlayLifecycle::Begin);
         }
         Err(e) => warn!("enter_play: failed to snapshot scene: {e}"),
     }
@@ -59,6 +72,7 @@ pub(crate) fn exit_play(world: &mut World) {
     if !world.resource::<PlayState>().is_playing() {
         return;
     }
+    world.trigger(PlayLifecycle::Ending);
     physics::pause_simulation(world);
 
     // Restoring despawns and respawns every scene entity, so the selection's
@@ -66,6 +80,9 @@ pub(crate) fn exit_play(world: &mut World) {
     // re-resolve it against the rebuilt id map.
     let selected_id = selected_object_id(world);
 
+    // Discard anything spawned during play, then replace the authored scene from
+    // the snapshot, so nothing from the play session leaks into edit mode.
+    scene_file::despawn_play_spawned(world);
     let snapshot = world.resource_mut::<PlayState>().snapshot.take();
     if let Some(ron) = snapshot {
         if let Err(e) = scene_file::restore_scene(world, &ron) {
@@ -75,6 +92,7 @@ pub(crate) fn exit_play(world: &mut World) {
 
     restore_selection(world, selected_id);
     world.resource_mut::<PlayState>().mode = PlayMode::Editing;
+    world.trigger(PlayLifecycle::End);
 }
 
 /// The stable id of the currently selected entity, if any.
@@ -148,6 +166,30 @@ mod tests {
             world.get::<Transform>(restored).unwrap().translation.y,
             5.0,
             "authored transform restored on stop"
+        );
+    }
+
+    #[test]
+    fn play_spawned_entities_are_discarded_on_stop() {
+        let mut world = test_world();
+        world.spawn((
+            SceneObjectId("cube".to_string()),
+            Name::new("Cube"),
+            Transform::from_xyz(0.0, 5.0, 0.0),
+        ));
+
+        enter_play(&mut world);
+        // A projectile spawned at runtime during play (no SceneObjectId).
+        let projectile = world.spawn((Name::new("Projectile"), Transform::default())).id();
+        exit_play(&mut world);
+
+        assert!(
+            world.get_entity(projectile).is_err(),
+            "runtime-spawned entity is discarded on stop"
+        );
+        assert!(
+            world.resource::<EditorIdMap>().fwd.contains_key("cube"),
+            "authored entity is restored"
         );
     }
 

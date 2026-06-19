@@ -3,7 +3,8 @@
 //! Owns the live ECS scene built from the editor's scene tree. The editor pushes
 //! its whole tree as JSON via `set_scene`; `rebuild_scene` diffs it against the
 //! world (spawn / patch / despawn), keyed by stable editor ids via `EditorIdMap`.
-//! The editor camera is viewport-owned and never touched here.
+//! The editor camera is viewport-owned and never touched here. Light spawn/patch
+//! logic lives in the [`crate::light`] module.
 
 pub mod schema;
 
@@ -13,6 +14,7 @@ use bevy::app::SubApps;
 use bevy::ecs::resource::Resource;
 use bevy::prelude::*;
 
+use crate::light;
 use schema::{SceneDoc, SceneEntityDef};
 
 /// Maps the editor's stable string ids to live Bevy entities (both directions).
@@ -28,6 +30,9 @@ pub(crate) struct SceneInitialized;
 
 /// Apply the editor scene tree (JSON) by diffing against the live world.
 /// Spawns new entities, patches changed transforms/materials, despawns removed.
+/// On the first push, the startup fallback scene is despawned so it never
+/// doubles up with the editor's scene (otherwise two overlapping lights/meshes
+/// would leave the editor light with no visible effect on the scene).
 pub(crate) fn rebuild_scene(sub_apps: &mut SubApps, json: &str) {
     let doc: SceneDoc = match serde_json::from_str(json) {
         Ok(d) => d,
@@ -38,8 +43,12 @@ pub(crate) fn rebuild_scene(sub_apps: &mut SubApps, json: &str) {
     };
 
     let world = sub_apps.main.world_mut();
+    let first_scene = world.get_resource::<SceneInitialized>().is_none();
     world.init_resource::<EditorIdMap>();
     world.insert_resource(SceneInitialized);
+    if first_scene {
+        light::despawn_fallback(world);
+    }
 
     let mut seen: HashSet<String> = HashSet::with_capacity(doc.entities.len());
 
@@ -47,18 +56,36 @@ pub(crate) fn rebuild_scene(sub_apps: &mut SubApps, json: &str) {
         if def.kind == "camera" {
             continue; // camera is viewport-owned
         }
+        if def.kind == "light:ambient" {
+            // Ambient light maps to the global resource, not a world entity.
+            light::apply_ambient_light(world, def);
+            continue;
+        }
         seen.insert(def.id.clone());
 
         let existing = world.resource::<EditorIdMap>().fwd.get(&def.id).copied();
 
-        match existing {
-            Some(entity) => update_entity(world, entity, def),
-            None => {
-                let entity = spawn_entity(world, def);
+        if let Some(entity) = existing {
+            if def.kind.starts_with("light:") {
+                // Lights respawn uniformly: handles kind changes + field updates
+                // without per-component-type patch branches.
+                world.despawn(entity);
+                {
+                    let mut map = world.resource_mut::<EditorIdMap>();
+                    map.rev.remove(&entity);
+                }
+                let new_entity = spawn_entity(world, def);
                 let mut map = world.resource_mut::<EditorIdMap>();
-                map.fwd.insert(def.id.clone(), entity);
-                map.rev.insert(entity, def.id.clone());
+                map.fwd.insert(def.id.clone(), new_entity);
+                map.rev.insert(new_entity, def.id.clone());
+            } else {
+                update_entity(world, entity, def);
             }
+        } else {
+            let entity = spawn_entity(world, def);
+            let mut map = world.resource_mut::<EditorIdMap>();
+            map.fwd.insert(def.id.clone(), entity);
+            map.rev.insert(entity, def.id.clone());
         }
     }
 
@@ -79,6 +106,7 @@ pub(crate) fn rebuild_scene(sub_apps: &mut SubApps, json: &str) {
 }
 
 /// Spawn a brand-new entity from its editor definition. Returns the Bevy entity.
+/// Mesh kinds are handled inline; light kinds delegate to [`light::spawn_light`].
 fn spawn_entity(world: &mut World, def: &SceneEntityDef) -> Entity {
     let transform = def.transform.to_bevy();
 
@@ -108,19 +136,7 @@ fn spawn_entity(world: &mut World, def: &SceneEntityDef) -> Entity {
                 .spawn((Mesh3d(mesh), MeshMaterial3d(material), transform))
                 .id()
         }
-        "light:directional" => {
-            let illuminance = def.light.as_ref().map(|l| l.illuminance).unwrap_or(10_000.0);
-            world
-                .spawn((
-                    DirectionalLight {
-                        illuminance,
-                        shadow_maps_enabled: true,
-                        ..default()
-                    },
-                    light_transform(&transform),
-                ))
-                .id()
-        }
+        k if k.starts_with("light:") => light::spawn_light(world, def),
         other => {
             warn!("set_scene: unknown entity kind '{other}', spawning empty");
             world.spawn(transform).id()
@@ -128,29 +144,11 @@ fn spawn_entity(world: &mut World, def: &SceneEntityDef) -> Entity {
     }
 }
 
-/// A `DirectionalLight` shines along its local -Z (rotation), not its position.
-/// If the editor gives an (almost) identity rotation, aim it into the scene from
-/// above so multiple faces are lit; otherwise honor the editor's rotation.
-fn light_transform(transform: &Transform) -> Transform {
-    const DEFAULT_DIR: Vec3 = Vec3::new(-1.0, -2.0, -1.0);
-    if transform.rotation.abs_diff_eq(Quat::IDENTITY, 1e-4) {
-        Transform::from_translation(transform.translation)
-            .looking_to(DEFAULT_DIR.normalize(), Vec3::Y)
-    } else {
-        *transform
-    }
-}
-
-/// Patch an existing entity's transform and (for meshes) material color.
+/// Patch an existing mesh entity's transform and material color.
+/// Lights are respawned by `rebuild_scene` (kind/field changes), not patched here.
 fn update_entity(world: &mut World, entity: Entity, def: &SceneEntityDef) {
-    let is_light = world.get::<DirectionalLight>(entity).is_some();
     if let Some(mut t) = world.get_mut::<Transform>(entity) {
-        let new_t = def.transform.to_bevy();
-        *t = if is_light {
-            light_transform(&new_t)
-        } else {
-            new_t
-        };
+        *t = def.transform.to_bevy();
     }
 
     if let (Some(mat_def), Some(handle)) = (
@@ -167,17 +165,13 @@ fn update_entity(world: &mut World, entity: Entity, def: &SceneEntityDef) {
             material.base_color = Color::srgba(c[0], c[1], c[2], c[3]);
         }
     }
-
-    if let Some(light_def) = def.light.as_ref() {
-        if let Some(mut light) = world.get_mut::<DirectionalLight>(entity) {
-            light.illuminance = light_def.illuminance;
-        }
-    }
 }
 
 /// Fallback scene used only if the editor hasn't pushed a scene yet (avoids a
 /// black viewport during startup). Once `set_scene` runs, `SceneInitialized`
-/// exists and this becomes a no-op.
+/// exists, this becomes a no-op, and the first `set_scene` despawns these
+/// fallback entities (tagged with [`light::FallbackMarker`]) so they don't
+/// double up with the editor's scene.
 pub(crate) fn ensure_default_scene(sub_apps: &mut SubApps) {
     let world = sub_apps.main.world_mut();
     if world.get_resource::<SceneInitialized>().is_some() {
@@ -208,14 +202,21 @@ pub(crate) fn ensure_default_scene(sub_apps: &mut SubApps) {
         Mesh3d(cube),
         MeshMaterial3d(cube_mat),
         Transform::from_xyz(0.0, 0.5, 0.0),
+        light::FallbackMarker,
     ));
-    world.spawn((Mesh3d(plane), MeshMaterial3d(plane_mat), Transform::default()));
+    world.spawn((
+        Mesh3d(plane),
+        MeshMaterial3d(plane_mat),
+        Transform::default(),
+        light::FallbackMarker,
+    ));
     world.spawn((
         DirectionalLight {
-            illuminance: 10_000.0,
+            illuminance: light::brightness_to_illuminance(light::DEFAULT_BRIGHTNESS),
             shadow_maps_enabled: true,
             ..default()
         },
         Transform::from_xyz(3.0, 8.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
+        light::FallbackMarker,
     ));
 }

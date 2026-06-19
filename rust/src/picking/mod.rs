@@ -38,6 +38,7 @@ fn pick_system(
     cameras: Query<(&Camera, &GlobalTransform, &RenderTarget)>,
     mut ray_cast: MeshRayCast,
     id_map: Res<EditorIdMap>,
+    parents: Query<&ChildOf>,
 ) -> Option<String> {
     let (image, cursor) = input.0;
     let (cam, cam_xf, _) = cameras
@@ -47,7 +48,26 @@ fn pick_system(
     let settings = MeshRayCastSettings::default().with_visibility(RayCastVisibility::Any);
     let hits = ray_cast.cast_ray(ray, &settings);
     let (entity, _) = hits.first()?;
-    id_map.rev.get(entity).cloned()
+    resolve_editor_id(*entity, &id_map, &parents)
+}
+
+/// Walk up the parent chain until an entity mapped to an editor id is found.
+/// Lets clicks on a light's hidden proxy child resolve to the light's id.
+fn resolve_editor_id(
+    mut entity: Entity,
+    id_map: &EditorIdMap,
+    parents: &Query<&ChildOf>,
+) -> Option<String> {
+    loop {
+        if let Some(id) = id_map.rev.get(&entity) {
+            return Some(id.clone());
+        }
+        let parent = parents.get(entity).ok()?.0;
+        if parent == entity {
+            return None;
+        }
+        entity = parent;
+    }
 }
 
 /// Set the selected entity from an editor id (None clears).

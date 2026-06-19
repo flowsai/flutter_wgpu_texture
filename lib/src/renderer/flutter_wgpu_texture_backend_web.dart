@@ -79,7 +79,11 @@ class _WebFlutterWgpuTextureBackend implements FlutterWgpuTextureBackend {
   int? get textureId => null;
 
   @override
+  @override
   String? get unsupportedReason => _unsupportedReason;
+
+  @override
+  int? get fps => null;
 
   @override
   String? get viewType => _viewType;

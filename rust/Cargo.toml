@@ -35,6 +35,7 @@ bevy = { path = "../../../bevy", default-features = false, features = [
   "bevy_core_pipeline",
   "tonemapping_luts",   # default Camera3d tonemapper (TonyMcMapFace) needs this
   "zstd_rust",          # tonemapping_luts LUTs are KTX2+zstd; pure-Rust backend
+  "area_light_luts",    # RectLight area-light LUTs (KTX2+zstd), same asset pattern
   "bevy_pbr",
   "bevy_asset",
   "raw_vulkan_init",

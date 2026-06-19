@@ -40,6 +40,9 @@ class FlutterWgpuTextureController extends ChangeNotifier {
   BigInt? get handle => _backend.handle;
   String? get unsupportedReason => _backend.unsupportedReason;
 
+  /// Measured viewport FPS (null until enough frames have rendered).
+  int? get fps => _backend.fps;
+
   Future<void> ensureInitialized(Size size, TickerProvider vsync) async {
     await _backend.ensureInitialized(size, vsync);
     notifyListeners();

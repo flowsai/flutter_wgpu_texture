@@ -18,7 +18,10 @@ pub struct SceneEntityDef {
     pub id: String,
     #[allow(dead_code)]
     pub name: String,
-    /// `mesh:cube` | `mesh:plane` | `light:directional` (cameras are viewport-owned).
+    /// `mesh:cube` | `mesh:plane` |
+    /// `light:directional` | `light:point` | `light:spot` | `light:rect` |
+    /// `light:ambient` (cameras are viewport-owned; `light:ambient` maps to the
+    /// global ambient resource, not a world entity).
     pub kind: String,
     pub transform: TransformDef,
     #[serde(default)]
@@ -51,7 +54,42 @@ pub struct MaterialDef {
     pub color: [f32; 4],
 }
 
-#[derive(Debug, Deserialize)]
+/// Flattened union of all Bevy light fields (Flax-style: a single `brightness`
+/// multiplier + `color` per light, plus per-type shape fields). The entity's
+/// `kind` discriminates which component to spawn; fields not relevant to a kind
+/// are ignored. `brightness` maps to lux (directional) or lumens (point/spot/
+/// rect) in `light::spawn_light`, and to `GlobalAmbientLight.brightness` for
+/// ambient. See ADR d01-lightdef-tagged-enum.
+#[derive(Debug, Deserialize, Default)]
 pub struct LightDef {
-    pub illuminance: f32,
+    /// Linear RGBA in 0..1. Defaults to white when `None`.
+    #[serde(default)]
+    pub color: Option<[f32; 4]>,
+
+    /// Flax-style brightness multiplier (default 3.14). Mapped to Bevy units by
+    /// `light::spawn_light` / `apply_ambient_light`.
+    #[serde(default)]
+    pub brightness: Option<f32>,
+
+    // point / spot / rect shape
+    #[serde(default)]
+    pub range: Option<f32>,
+    #[serde(default)]
+    pub radius: Option<f32>,
+
+    // spot (radians)
+    #[serde(default)]
+    pub inner_angle: Option<f32>,
+    #[serde(default)]
+    pub outer_angle: Option<f32>,
+
+    // rect
+    #[serde(default)]
+    pub width: Option<f32>,
+    #[serde(default)]
+    pub height: Option<f32>,
+
+    // shared
+    #[serde(default)]
+    pub shadow_maps_enabled: Option<bool>,
 }

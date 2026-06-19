@@ -14,6 +14,10 @@ abstract class FlutterWgpuTextureBackend {
   BigInt? get handle;
   String? get unsupportedReason;
 
+  /// Measured viewport frame rate (frames per second), or null until enough
+  /// frames have been rendered to estimate it.
+  int? get fps;
+
   Future<void> ensureInitialized(Size size, TickerProvider vsync);
   Future<void> dispose();
   Future<void> startAnimation();

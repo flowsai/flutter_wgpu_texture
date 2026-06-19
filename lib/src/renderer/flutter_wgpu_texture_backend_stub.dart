@@ -34,7 +34,11 @@ class _UnsupportedFlutterWgpuTextureBackend
   int? get textureId => null;
 
   @override
-  String? get unsupportedReason => 'flutter_wgpu_texture is unavailable here.';
+  String? get unsupportedReason =>
+      'flutter_wgpu_texture is unavailable here.';
+
+  @override
+  int? get fps => null;
 
   @override
   String? get viewType => null;

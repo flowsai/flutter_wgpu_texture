@@ -41,6 +41,11 @@ class _DesktopFlutterWgpuTextureBackend
   bool _initialized = false;
   bool _animating = false;
   bool _frameInFlight = false;
+
+  // FPS tracking (EMA of inter-frame interval; see _measureFps).
+  DateTime? _lastRenderedFrame;
+  double _fpsEma = 0;
+  int _fps = 0;
   Size? _size;
 
   @override
@@ -303,6 +308,9 @@ class _DesktopFlutterWgpuTextureBackend
     }
   }
 
+  @override
+  int? get fps => _fps == 0 ? null : _fps;
+
   Future<void> _pumpFrame() async {
     final currentHandle = _handle;
     if (currentHandle == null || !_initialized || _frameInFlight) {
@@ -311,8 +319,11 @@ class _DesktopFlutterWgpuTextureBackend
     _frameInFlight = true;
     try {
       final rendered = await rust_api.requestFrame(handle: currentHandle);
-      if (rendered && _textureId != null) {
-        await FlutterWgpuPlatformChannel.markFrameAvailable(surfaceId);
+      if (rendered) {
+        _measureFps();
+        if (_textureId != null) {
+          await FlutterWgpuPlatformChannel.markFrameAvailable(surfaceId);
+        }
       }
     } catch (error) {
       if (!_isTransientPresentTargetError(error)) {
@@ -321,6 +332,22 @@ class _DesktopFlutterWgpuTextureBackend
     } finally {
       _frameInFlight = false;
     }
+  }
+
+  /// Exponential moving average of the inter-frame interval, updated on each
+  /// successfully rendered frame. Reported via [fps].
+  void _measureFps() {
+    final now = DateTime.now();
+    final last = _lastRenderedFrame;
+    if (last != null) {
+      final dt = now.difference(last).inMicroseconds / 1e6;
+      if (dt > 0) {
+        final instant = 1.0 / dt;
+        _fpsEma = _fpsEma == 0 ? instant : _fpsEma * 0.9 + instant * 0.1;
+        _fps = _fpsEma.round();
+      }
+    }
+    _lastRenderedFrame = now;
   }
 
   bool _isTransientPresentTargetError(Object error) {

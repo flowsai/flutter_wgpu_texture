@@ -162,6 +162,7 @@ fn spawn_entity(world: &mut World, def: &SceneEntityDef, type_registry: &TypeReg
             let entity = light::spawn_light(world, def);
             world.entity_mut(entity)
         }
+        "actor:empty" => world.spawn(transform),
         other => {
             warn!("set_scene: unknown entity kind '{other}', spawning empty");
             world.spawn(transform)

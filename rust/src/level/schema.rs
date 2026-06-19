@@ -22,8 +22,9 @@ pub struct SceneEntityDef {
     pub name: String,
     /// `mesh:cube` | `mesh:plane` |
     /// `light:directional` | `light:point` | `light:spot` | `light:rect` |
-    /// `light:ambient` (cameras are viewport-owned; `light:ambient` maps to the
-    /// global ambient resource, not a world entity).
+    /// `light:ambient` | `actor:empty` (cameras are viewport-owned;
+    /// `light:ambient` maps to the global ambient resource, not a world entity;
+    /// `actor:empty` is a bare transform container).
     pub kind: String,
     /// Parent entity id within this scene. None = root. Wired to `ChildOf` so
     /// the child transform is relative to its parent.

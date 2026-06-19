@@ -118,6 +118,10 @@ void setPlayMode({required BigInt handle, required String mode}) =>
 void setViewMode({required BigInt handle, required String mode}) =>
     RustLib.instance.api.crateApiSetViewMode(handle: handle, mode: mode);
 
+/// Return the current editor scene as JSON (SceneDoc format) for Dart tree resync.
+String getScene({required BigInt handle}) =>
+    RustLib.instance.api.crateApiGetScene(handle: handle);
+
 /// Orbit the camera around its focus point (Alt+LMB drag).
 void cameraOrbit({
   required BigInt handle,

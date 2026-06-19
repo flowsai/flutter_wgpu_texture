@@ -19,6 +19,7 @@ export 'src/rust/api.dart'
         setGizmoMode,
         setPlayMode,
         setViewMode,
+        getScene,
         cameraOrbit,
         cameraPan,
         cameraZoom,

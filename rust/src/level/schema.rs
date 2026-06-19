@@ -5,16 +5,16 @@
 //! world (see `level::rebuild_scene`).
 
 use bevy::prelude::{Quat, Transform};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::components::ComponentDef;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SceneDoc {
     pub entities: Vec<SceneEntityDef>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SceneEntityDef {
     /// Stable editor id — the join key with the `SceneObjectId` component.
     pub id: String,
@@ -40,7 +40,7 @@ pub struct SceneEntityDef {
     pub components: Vec<ComponentDef>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TransformDef {
     pub translation: [f32; 3],
     /// Quaternion, xyzw order.
@@ -58,7 +58,7 @@ impl TransformDef {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct MaterialDef {
     /// Linear RGBA in 0..1.
     pub color: [f32; 4],
@@ -69,7 +69,7 @@ pub struct MaterialDef {
 /// discriminates which component to spawn; fields not relevant to a kind are
 /// ignored. `brightness` maps to lux (directional) or lumens (point/spot/rect)
 /// in `light::spawn_light`, and to `GlobalAmbientLight.brightness` for ambient.
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct LightDef {
     /// Linear RGBA in 0..1. Defaults to white when `None`.
     #[serde(default)]

@@ -7,7 +7,7 @@ use bevy::reflect::structs::DynamicStruct;
 use bevy::reflect::tuple_struct::DynamicTupleStruct;
 use bevy::reflect::{TypeInfo, TypeRegistry};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 /// Stable per-entity id, persisted as a reflected component.
@@ -17,7 +17,7 @@ pub struct SceneObjectId(pub String);
 
 /// One reflected component on an editor entity. `fields` is a JSON object
 /// keyed by field name.
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct ComponentDef {
     pub type_path: String,
     #[serde(default)]

@@ -250,6 +250,14 @@ impl Renderer {
         });
     }
 
+    fn get_scene(&mut self) -> Result<String, String> {
+        let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+        device::send(RenderCmd::GetScene { reply: reply_tx })?;
+        reply_rx
+            .recv()
+            .map_err(|_| "render thread dropped get_scene reply".to_string())
+    }
+
     fn camera_orbit(&mut self, dx: f32, dy: f32) {
         let _ = device::send(RenderCmd::CameraOrbit {
             image: self.viewport_image,
@@ -548,6 +556,16 @@ pub(crate) fn set_view_mode(handle: u64, mode: &str) -> Result<(), String> {
         .unwrap_or_else(|err| err.into_inner())
         .set_view_mode(mode);
     Ok(())
+}
+
+pub(crate) fn get_scene(handle: u64) -> Result<String, String> {
+    let renderer =
+        lookup_renderer(handle).ok_or_else(|| "renderer handle not found".to_string())?;
+    let result = renderer
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .get_scene();
+    result
 }
 
 macro_rules! camera_fn {

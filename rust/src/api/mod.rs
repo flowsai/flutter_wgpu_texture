@@ -145,6 +145,13 @@ pub fn set_view_mode(handle: u64, mode: String) -> Result<(), String> {
     engine::set_view_mode(handle, &mode)
 }
 
+/// Return the current editor scene as a JSON string (SceneDoc format).
+/// Used by the Dart editor to resync its scene tree after a `load_scene`.
+#[frb(sync)]
+pub fn get_scene(handle: u64) -> Result<String, String> {
+    engine::get_scene(handle)
+}
+
 // ── Camera navigation (Unity-style; deltas are render-target pixels) ──────────
 
 /// Orbit the camera around its focus point (Alt+LMB drag).

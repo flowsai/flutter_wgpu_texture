@@ -69,6 +69,8 @@ pub(crate) enum RenderCmd {
     SetPlayMode { mode: String },
     /// Switch the viewport view mode ("Lit" | "Unlit" | "Wireframe").
     SetViewMode { mode: String },
+    /// Serialize the current editor scene to JSON (SceneDoc format) and reply.
+    GetScene { reply: Sender<String> },
     /// Orbit the camera around its focus (Alt+LMB drag). dx/dy = pixel deltas.
     CameraOrbit { image: AssetId<Image>, dx: f32, dy: f32 },
     /// Pan the camera focus in the view plane (MMB drag).
@@ -212,6 +214,10 @@ pub(super) fn render_thread_main(ready_tx: Sender<Result<(), String>>) {
             }
             RenderCmd::SetViewMode { mode } => {
                 level::view_mode::set_view_mode(sub_apps.main.world_mut(), &mode);
+            }
+            RenderCmd::GetScene { reply } => {
+                let json = level::scene_file::world_to_scene_json(sub_apps.main.world_mut());
+                let _ = reply.send(json);
             }
             RenderCmd::CameraOrbit { image, dx, dy } => {
                 viewport::camera::camera_orbit(&mut sub_apps, image, dx, dy);

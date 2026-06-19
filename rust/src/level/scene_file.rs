@@ -15,6 +15,7 @@ use bevy::world_serialization::{DynamicWorld, DynamicWorldBuilder, WorldFilter};
 use serde::de::DeserializeSeed;
 
 use super::components::SceneObjectId;
+use super::schema::{LightDef, MaterialDef, SceneDoc, SceneEntityDef, TransformDef};
 use super::EditorIdMap;
 
 /// Components that are editor-internal, derived, or asset-handle-based and must
@@ -81,6 +82,115 @@ pub fn despawn_play_spawned(world: &mut World) {
             world.despawn(entity);
         }
     }
+}
+
+/// Reconstruct a `SceneDoc` JSON from the live ECS world. Used by `get_scene`
+/// so the Dart editor can resync its tree after a `load_scene`.
+pub fn world_to_scene_json(world: &mut World) -> String {
+    use crate::level::primitives::{MaterialColor, PrimitiveMesh};
+
+    world.init_resource::<EditorIdMap>();
+
+    // Collect (entity, id, parent_entity) triples first to avoid borrow issues.
+    let entries: Vec<(Entity, String, Option<Entity>)> = {
+        let map = world.resource::<EditorIdMap>();
+        map.fwd
+            .iter()
+            .map(|(id, &entity)| {
+                let parent = world
+                    .get::<ChildOf>(entity)
+                    .map(|c| c.parent());
+                (entity, id.clone(), parent)
+            })
+            .collect()
+    };
+
+    let mut entities: Vec<SceneEntityDef> = Vec::with_capacity(entries.len());
+
+    for (entity, id, parent_entity) in entries {
+        // Resolve parent_id from the reverse map.
+        let parent_id = parent_entity.and_then(|p| {
+            world.resource::<EditorIdMap>().rev.get(&p).cloned()
+        });
+
+        let transform = world.get::<Transform>(entity).copied().unwrap_or_default();
+        let t = transform.translation;
+        let r = transform.rotation;
+        let s = transform.scale;
+        let transform_def = TransformDef {
+            translation: [t.x, t.y, t.z],
+            rotation: [r.x, r.y, r.z, r.w],
+            scale: [s.x, s.y, s.z],
+        };
+
+        let name = world
+            .get::<Name>(entity)
+            .map(|n| n.as_str().to_string())
+            .unwrap_or_else(|| id.clone());
+
+        // Determine kind from ECS components.
+        let kind = if world.get::<crate::light::LightProxy>(entity).is_some() {
+            // Skip light proxy children — they are editor-only.
+            continue;
+        } else if world.get::<DirectionalLight>(entity).is_some() {
+            "light:directional"
+        } else if world.get::<PointLight>(entity).is_some() {
+            "light:point"
+        } else if world.get::<SpotLight>(entity).is_some() {
+            "light:spot"
+        } else if world.get::<RectLight>(entity).is_some() {
+            "light:rect"
+        } else if world.get::<PrimitiveMesh>(entity).is_some() {
+            let prim = world.get::<PrimitiveMesh>(entity).unwrap();
+            if prim.0 == "plane" { "mesh:plane" } else { "mesh:cube" }
+        } else {
+            "actor:empty"
+        };
+
+        // Light fields.
+        let light = if kind.starts_with("light:") {
+            let color = if let Some(l) = world.get::<DirectionalLight>(entity) {
+                Some(color_to_arr(l.color))
+            } else if let Some(l) = world.get::<PointLight>(entity) {
+                Some(color_to_arr(l.color))
+            } else if let Some(l) = world.get::<SpotLight>(entity) {
+                Some(color_to_arr(l.color))
+            } else if let Some(l) = world.get::<RectLight>(entity) {
+                Some(color_to_arr(l.color))
+            } else {
+                None
+            };
+            Some(LightDef { color, ..Default::default() })
+        } else {
+            None
+        };
+
+        // Material color.
+        let material = world.get::<MaterialColor>(entity).map(|mc| MaterialDef { color: mc.0 });
+
+        // Reflect add-on components are not re-extracted here: they are
+        // re-pushed by the Dart editor on the next set_scene after load.
+        let components: Vec<super::components::ComponentDef> = Vec::new();
+
+        entities.push(SceneEntityDef {
+            id,
+            name,
+            kind: kind.to_string(),
+            parent_id,
+            transform: transform_def,
+            material,
+            light,
+            components,
+        });
+    }
+
+    let doc = SceneDoc { entities };
+    serde_json::to_string(&doc).unwrap_or_else(|_| r#"{"entities":[]}"#.to_string())
+}
+
+fn color_to_arr(color: Color) -> [f32; 4] {
+    let c = color.to_srgba();
+    [c.red, c.green, c.blue, c.alpha]
 }
 
 /// Serialize the editor scene (entities with a `SceneObjectId`) to `.scn.ron`.

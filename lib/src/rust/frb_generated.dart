@@ -209,6 +209,8 @@ abstract class RustLibApi extends BaseApi {
 
   void crateApiSetViewMode({required BigInt handle, required String mode});
 
+  String crateApiGetScene({required BigInt handle});
+
   void crateApiSetScene({required BigInt handle, required String json});
 
   void crateApiSetVec4Param({
@@ -1112,6 +1114,31 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateApiSetViewModeConstMeta => const TaskConstMeta(
     debugName: "set_view_mode",
     argNames: ["handle", "mode"],
+  );
+
+  @override
+  String crateApiGetScene({required BigInt handle}) {
+    return handler.executeSync(
+      SyncTask(
+        callFfi: () {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_u_64(handle, serializer);
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 36)!;
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiGetSceneConstMeta,
+        argValues: [handle],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiGetSceneConstMeta => const TaskConstMeta(
+    debugName: "get_scene",
+    argNames: ["handle"],
   );
 
   @override

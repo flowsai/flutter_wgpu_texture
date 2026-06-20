@@ -28,6 +28,10 @@ fn scene_component_filter() -> WorldFilter {
         .deny::<crate::light::FallbackMarker>()
         .deny::<Mesh3d>()
         .deny::<MeshMaterial3d<StandardMaterial>>()
+        // Atmosphere holds an ephemeral Handle<ScatteringMedium> that cannot be
+        // deserialized; the SkyAtmosphere marker round-trips and
+        // reestablish_atmosphere rebuilds the component on load.
+        .deny::<bevy::light::Atmosphere>()
 }
 
 /// Serialize the editor scene (entities with a `SceneObjectId`) to a `.scn.ron`

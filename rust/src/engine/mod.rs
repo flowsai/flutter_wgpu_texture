@@ -339,10 +339,7 @@ impl Renderer {
 
     /// Render one frame and copy it into the present target's shared texture.
     fn render(&mut self) -> Result<bool, String> {
-        let dst = self
-            .present
-            .as_ref()
-            .and_then(|t| t.shared_texture().cloned());
+        let dst = self.present.as_ref().and_then(|t| t.copy_dst());
 
         let (reply_tx, reply_rx) = std::sync::mpsc::channel();
         device::send(RenderCmd::RenderFrame {
@@ -681,16 +678,33 @@ pub(crate) fn backend_code_for_handle(handle: u64) -> u8 {
         .unwrap_or(BACKEND_UNKNOWN)
 }
 
-// Metal / DXGI paths are not supported in the Bevy-shared-device build yet.
+// DXGI present is not supported in the Bevy-shared-device build yet.
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 pub(crate) fn attach_metal_texture(
-    _handle: u64,
-    _mtl_texture_ptr: *mut c_void,
-    _width: u32,
-    _height: u32,
-    _bytes_per_row: u32,
+    handle: u64,
+    mtl_texture_ptr: *mut c_void,
+    width: u32,
+    height: u32,
+    bytes_per_row: u32,
 ) -> Result<(), String> {
-    Err("Metal present not yet supported with Bevy renderer".to_string())
+    let renderer =
+        lookup_renderer(handle).ok_or_else(|| "renderer handle not found".to_string())?;
+    let mut renderer = renderer.lock().unwrap_or_else(|err| err.into_inner());
+    // Clone the Arc<Device> before taking &mut self below.
+    let device = renderer.ctx.device.clone();
+    let target = present::attach_present_texture(
+        device.as_ref(),
+        mtl_texture_ptr,
+        width,
+        height,
+        bytes_per_row,
+    )
+    .ok_or_else(|| "failed to wrap Flutter Metal texture (null ptr or zero size)".to_string())?;
+    // Size Bevy's offscreen viewport to the Flutter texture so the per-frame
+    // copy_texture_to_texture extent matches exactly.
+    renderer.resize(width, height);
+    renderer.present = Some(target);
+    Ok(())
 }
 
 #[cfg(target_os = "windows")]

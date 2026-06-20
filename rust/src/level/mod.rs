@@ -191,7 +191,7 @@ fn spawn_entity(world: &mut World, def: &SceneEntityDef, type_registry: &TypeReg
             let medium = world
                 .resource_mut::<Assets<ScatteringMedium>>()
                 .add(ScatteringMedium::default());
-            world.spawn((transform, SkyAtmosphere, Atmosphere::earth(medium)))
+            world.spawn((SkyAtmosphere, Atmosphere::earth(medium)))
         }
         "actor:empty" => world.spawn(transform),
         other => {

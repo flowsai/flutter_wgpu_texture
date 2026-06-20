@@ -50,8 +50,15 @@ pub(crate) fn spawn_viewport(
     // In this Bevy, RenderTarget is its own component (not Camera.target).
     world.init_resource::<OrbitCamera>();
     let cam_xf = world.resource::<OrbitCamera>().transform();
+    let atmo_settings = AtmosphereSettings {
+        // Spread the aerial-view LUT slices over a scene-relevant distance
+        // (default 32 km causes visible banding in meter-scale scenes).
+        aerial_view_lut_max_distance: 1000.0,
+        aerial_view_lut_size: bevy::math::UVec3::new(32, 32, 64),
+        ..AtmosphereSettings::default()
+    };
     let camera = world
-        .spawn((Camera3d::default(), RenderTarget::Image(handle.into()), cam_xf, AtmosphereSettings::default()))
+        .spawn((Camera3d::default(), RenderTarget::Image(handle.into()), cam_xf, atmo_settings))
         .id();
     (image_id, camera)
 }

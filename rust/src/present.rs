@@ -1,7 +1,9 @@
 #[cfg(any(target_os = "macos", target_os = "ios"))]
-use metal::foreign_types::ForeignType;
+use objc2::rc::Retained;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
-use metal::MTLTextureType;
+use objc2::runtime::ProtocolObject;
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+use objc2_metal::{MTLTexture, MTLTextureType};
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 use std::ffi::c_void;
 #[cfg(target_os = "linux")]
@@ -43,6 +45,21 @@ impl PresentTextureTarget {
         self.shared_texture.as_ref()
     }
 
+    /// The texture the renderer should copy each finished frame into, i.e. the
+    /// one Flutter ultimately samples. On Linux/Windows that's the shared
+    /// (DMA-BUF / DXGI) texture; on macOS/iOS the Flutter-provided Metal texture
+    /// IS the render target, so we copy straight into it.
+    pub(crate) fn copy_dst(&self) -> Option<wgpu::Texture> {
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        {
+            Some(self.render_texture.clone())
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+        {
+            self.shared_texture.clone()
+        }
+    }
+
     #[cfg(target_os = "linux")]
     pub(crate) fn dma_buf_image(&self) -> Option<&Arc<OwnedDmaBufImage>> {
         self.dma_buf_image.as_ref()
@@ -77,13 +94,16 @@ pub(crate) fn attach_present_texture(
         return None;
     }
 
-    let raw_ptr = mtl_texture_ptr as *mut metal::MTLTexture;
-    let raw_texture = unsafe { metal::Texture::from_ptr(raw_ptr) };
+    // The pointer is a borrowed `id<MTLTexture>` owned by Flutter. Retain it so
+    // our wgpu Texture holds its own strong reference for its lifetime (released
+    // on drop); Flutter keeps its own reference independently.
+    let obj_ptr = mtl_texture_ptr as *mut ProtocolObject<dyn MTLTexture>;
+    let raw_texture = unsafe { Retained::retain(obj_ptr) }?;
     let hal_texture = unsafe {
         wgpu_hal::metal::Device::texture_from_raw(
             raw_texture,
             wgpu::TextureFormat::Bgra8Unorm,
-            MTLTextureType::D2,
+            MTLTextureType::Type2D,
             1,
             1,
             CopyExtent {
@@ -105,7 +125,11 @@ pub(crate) fn attach_present_texture(
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: wgpu::TextureFormat::Bgra8Unorm,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        // COPY_DST so the Bevy renderer can blit its finished frame into this
+        // Flutter-owned Metal texture (see viewport::render_one_frame).
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+            | wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     };
 

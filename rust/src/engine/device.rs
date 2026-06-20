@@ -84,7 +84,20 @@ pub(super) fn build_app() -> Result<(SubApps, SharedGpu), String> {
     let mut app = App::new();
 
     let mut wgpu_settings = WgpuSettings::default();
-    wgpu_settings.backends = Some(Backends::VULKAN);
+    // Backend per-OS: the present/share path differs (DMA-BUF on Linux, IOSurface/
+    // Metal on macOS, DXGI on Windows), so the wgpu device must match.
+    #[cfg(target_os = "linux")]
+    {
+        wgpu_settings.backends = Some(Backends::VULKAN);
+    }
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    {
+        wgpu_settings.backends = Some(Backends::METAL);
+    }
+    #[cfg(target_os = "windows")]
+    {
+        wgpu_settings.backends = Some(Backends::DX12);
+    }
 
     // Install the DMA-BUF device-extension callback before RenderPlugin builds.
     #[cfg(target_os = "linux")]

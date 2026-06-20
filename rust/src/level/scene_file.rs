@@ -262,6 +262,9 @@ pub fn spawn_dynamic_world(
     // Deserialized lights carry only their reflected component; recreate the
     // editor gizmo + picker proxy that are not stored in the scene.
     crate::light::reestablish_light_proxies(world);
+    // Atmosphere entities carry only their marker; the asset-backed component
+    // is not serialized and must be recreated.
+    super::reestablish_atmosphere(world);
     Ok(())
 }
 
@@ -396,6 +399,59 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         // Silence unused `world` entity ids.
         let _ = child;
+    }
+
+    #[test]
+    fn round_trips_atmosphere_and_reestablishes_component() {
+        use bevy::asset::AssetPlugin;
+        use bevy::light::{atmosphere::ScatteringMedium, Atmosphere};
+        use bevy::prelude::*;
+
+        use crate::level::components::SkyAtmosphere;
+
+        // The atmosphere's medium is an asset, so the world needs the asset
+        // registered for reestablish_atmosphere to act.
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<ScatteringMedium>();
+        let src = app.world_mut();
+        let atr = src.get_resource_or_init::<AppTypeRegistry>().clone();
+        crate::level::register_scene_types(&mut atr.write());
+        src.init_resource::<EditorIdMap>();
+
+        let medium = src
+            .resource_mut::<Assets<ScatteringMedium>>()
+            .add(ScatteringMedium::default());
+        src.spawn((
+            SceneObjectId("sky".to_string()),
+            Name::new("Sky Atmosphere"),
+            Transform::default(),
+            SkyAtmosphere,
+            Atmosphere::earth(medium),
+        ));
+
+        let ron = serialize_scene(src).expect("serialize");
+
+        // The snapshot keeps the marker but drops the asset-backed Atmosphere.
+        let type_registry = src.resource::<AppTypeRegistry>().clone();
+        let dynamic = {
+            let guard = type_registry.read();
+            let mut load = NoOpLoad;
+            load_dynamic_world(ron.as_bytes(), &guard, &mut load).expect("deserialize")
+        };
+        let guard = type_registry.read();
+        spawn_dynamic_world(src, &dynamic, &guard).expect("spawn");
+        drop(guard);
+
+        let sky = src.resource::<EditorIdMap>().fwd["sky"];
+        assert!(
+            src.get::<SkyAtmosphere>(sky).is_some(),
+            "marker survives the round-trip"
+        );
+        assert!(
+            src.get::<Atmosphere>(sky).is_some(),
+            "Atmosphere is re-attached after restore"
+        );
     }
 
     #[test]

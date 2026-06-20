@@ -188,10 +188,8 @@ fn spawn_entity(world: &mut World, def: &SceneEntityDef, type_registry: &TypeReg
             world.entity_mut(entity)
         }
         "sky:atmosphere" => {
-            let medium = world
-                .resource_mut::<Assets<ScatteringMedium>>()
-                .add(ScatteringMedium::default());
-            world.spawn((SkyAtmosphere, Atmosphere::earth(medium)))
+            let atmo = make_atmosphere(world);
+            world.spawn((SkyAtmosphere, atmo))
         }
         "actor:empty" => world.spawn(transform),
         other => {
@@ -203,6 +201,35 @@ fn spawn_entity(world: &mut World, def: &SceneEntityDef, type_registry: &TypeReg
     entity_world_mut.insert((id, name));
     spawn_components(&mut entity_world_mut, &def.components, type_registry);
     entity_world_mut.id()
+}
+
+/// Build an `Atmosphere` with a freshly registered scattering medium. The medium
+/// is an asset handle and is not part of the serialized scene, so it must be
+/// recreated whenever an atmosphere entity is spawned or restored.
+fn make_atmosphere(world: &mut World) -> Atmosphere {
+    let medium = world
+        .resource_mut::<Assets<ScatteringMedium>>()
+        .add(ScatteringMedium::default());
+    Atmosphere::earth(medium)
+}
+
+/// Re-attach the `Atmosphere` component to `SkyAtmosphere`-marked entities that
+/// lack it. The atmosphere's `medium` is an asset handle, not serialized into
+/// the scene, so entities brought in by the scene deserializer (load or
+/// play-mode restore) carry only the `SkyAtmosphere` marker and must have their
+/// `Atmosphere` recreated.
+pub(crate) fn reestablish_atmosphere(world: &mut World) {
+    if !world.contains_resource::<Assets<ScatteringMedium>>() {
+        return;
+    }
+    let entities: Vec<Entity> = world
+        .query_filtered::<Entity, (With<SkyAtmosphere>, Without<Atmosphere>)>()
+        .iter(world)
+        .collect();
+    for entity in entities {
+        let atmo = make_atmosphere(world);
+        world.entity_mut(entity).insert(atmo);
+    }
 }
 
 /// Patch an existing entity's transform, material color, and reflected add-on

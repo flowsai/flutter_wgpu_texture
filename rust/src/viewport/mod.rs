@@ -7,6 +7,7 @@ use bevy::app::{AppLabel, SubApps};
 use bevy::asset::{AssetId, RenderAssetUsages};
 use bevy::camera::RenderTarget;
 use bevy::image::Image;
+use bevy::pbr::AtmosphereSettings;
 use bevy::prelude::*;
 use bevy::render::render_asset::RenderAssets;
 use bevy::render::render_resource::{PollType, TextureFormat};
@@ -50,7 +51,7 @@ pub(crate) fn spawn_viewport(
     world.init_resource::<OrbitCamera>();
     let cam_xf = world.resource::<OrbitCamera>().transform();
     let camera = world
-        .spawn((Camera3d::default(), RenderTarget::Image(handle.into()), cam_xf))
+        .spawn((Camera3d::default(), RenderTarget::Image(handle.into()), cam_xf, AtmosphereSettings::default()))
         .id();
     (image_id, camera)
 }

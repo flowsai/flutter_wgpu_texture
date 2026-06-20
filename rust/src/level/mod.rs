@@ -19,8 +19,10 @@ use bevy::ecs::resource::Resource;
 use bevy::prelude::*;
 use bevy::reflect::TypeRegistry;
 
+use bevy::light::{Atmosphere, atmosphere::ScatteringMedium};
+
 use crate::light;
-use components::{spawn_components, SceneObjectId};
+use components::{spawn_components, SceneObjectId, SkyAtmosphere};
 use schema::{SceneDoc, SceneEntityDef};
 
 /// Register every component type that may appear on a scene entity, so the
@@ -40,6 +42,7 @@ pub(crate) fn register_scene_types(registry: &mut TypeRegistry) {
     registry.register::<PointLight>();
     registry.register::<SpotLight>();
     registry.register::<bevy::light::RectLight>();
+    registry.register::<SkyAtmosphere>();
 }
 
 /// Maps the editor's stable string ids to live Bevy entities (both directions).
@@ -183,6 +186,12 @@ fn spawn_entity(world: &mut World, def: &SceneEntityDef, type_registry: &TypeReg
         k if k.starts_with("light:") => {
             let entity = light::spawn_light(world, def);
             world.entity_mut(entity)
+        }
+        "sky:atmosphere" => {
+            let medium = world
+                .resource_mut::<Assets<ScatteringMedium>>()
+                .add(ScatteringMedium::default());
+            world.spawn((transform, SkyAtmosphere, Atmosphere::earth(medium)))
         }
         "actor:empty" => world.spawn(transform),
         other => {

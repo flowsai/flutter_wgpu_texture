@@ -14,7 +14,7 @@ use bevy::world_serialization::serde::WorldDeserializer;
 use bevy::world_serialization::{DynamicWorld, DynamicWorldBuilder, WorldFilter};
 use serde::de::DeserializeSeed;
 
-use super::components::SceneObjectId;
+use super::components::{SceneObjectId, SkyAtmosphere};
 use super::schema::{LightDef, MaterialDef, SceneDoc, SceneEntityDef, TransformDef};
 use super::EditorIdMap;
 
@@ -143,6 +143,8 @@ pub fn world_to_scene_json(world: &mut World) -> String {
         } else if world.get::<PrimitiveMesh>(entity).is_some() {
             let prim = world.get::<PrimitiveMesh>(entity).unwrap();
             if prim.0 == "plane" { "mesh:plane" } else { "mesh:cube" }
+        } else if world.get::<SkyAtmosphere>(entity).is_some() {
+            "sky:atmosphere"
         } else {
             "actor:empty"
         };

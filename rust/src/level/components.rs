@@ -15,6 +15,11 @@ use serde_json::{Map, Value};
 #[reflect(Component)]
 pub struct SceneObjectId(pub String);
 
+/// Marker for the procedural atmosphere entity.
+#[derive(Component, Reflect, Default)]
+#[reflect(Component)]
+pub struct SkyAtmosphere;
+
 /// One reflected component on an editor entity. `fields` is a JSON object
 /// keyed by field name.
 #[derive(Debug, Serialize, Deserialize, Default)]

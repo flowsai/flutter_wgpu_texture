@@ -79,6 +79,15 @@ class _DesktopFlutterWgpuTextureBackend
     _size = Size(targetWidth.toDouble(), targetHeight.toDouble());
 
     if (_initialized) {
+      // Recreate the ticker if a prior detachTicker() disposed it (e.g. the
+      // host State was disposed on an editor-mode switch and is now remounted
+      // with a fresh TickerProvider).
+      if (_ticker == null) {
+        _ticker = vsync.createTicker(_onTick);
+        if (_animating) {
+          _ticker!.start();
+        }
+      }
       await _resizePlatformSurface(targetWidth, targetHeight);
       return;
     }
@@ -99,6 +108,16 @@ class _DesktopFlutterWgpuTextureBackend
     if (autoStart) {
       await startAnimation();
     }
+  }
+
+  @override
+  void detachTicker() {
+    // Stop and dispose the ticker (vended by the host State's TickerProvider)
+    // but keep the renderer alive. _animating is preserved so a remount can
+    // resume the loop when it recreates the ticker.
+    _ticker?.dispose();
+    _ticker = null;
+    _frameInFlight = false;
   }
 
   @override

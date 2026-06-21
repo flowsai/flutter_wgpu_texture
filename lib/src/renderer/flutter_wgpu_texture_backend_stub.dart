@@ -44,6 +44,9 @@ class _UnsupportedFlutterWgpuTextureBackend
   String? get viewType => null;
 
   @override
+  void detachTicker() {}
+
+  @override
   Future<void> dispose() async {}
 
   @override

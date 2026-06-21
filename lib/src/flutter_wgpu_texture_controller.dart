@@ -48,6 +48,13 @@ class FlutterWgpuTextureController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Disposes the render ticker tied to [vsync] without tearing down the
+  /// renderer. Call this from the host State's `dispose()` so the ticker (which
+  /// the State vended as a [TickerProvider]) is released before the State is.
+  void detachTicker() {
+    _backend.detachTicker();
+  }
+
   Future<void> disposeRenderer() async {
     await _backend.dispose();
     notifyListeners();

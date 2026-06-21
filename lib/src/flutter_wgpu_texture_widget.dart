@@ -43,6 +43,10 @@ class _FlutterWgpuTextureState extends State<FlutterWgpuTexture>
   @override
   void dispose() {
     widget.controller.removeListener(_onControllerChanged);
+    // The render Ticker was vended by this State's SingleTickerProviderStateMixin
+    // but is stored in the (longer-lived) controller backend. Dispose it before
+    // super.dispose(), or the mixin asserts "disposed with an active Ticker".
+    widget.controller.detachTicker();
     super.dispose();
   }
 
@@ -57,6 +61,10 @@ class _FlutterWgpuTextureState extends State<FlutterWgpuTexture>
         if (_lastSize != size) {
           _lastSize = size;
           WidgetsBinding.instance.addPostFrameCallback((_) {
+            // The State may have been disposed between scheduling and firing
+            // (e.g. the viewport unmounted on a mode switch). Initializing then
+            // would create a Ticker against a dead TickerProvider.
+            if (!mounted) return;
             widget.controller.ensureInitialized(size, this);
           });
         }

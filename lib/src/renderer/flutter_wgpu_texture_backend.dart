@@ -19,6 +19,15 @@ abstract class FlutterWgpuTextureBackend {
   int? get fps;
 
   Future<void> ensureInitialized(Size size, TickerProvider vsync);
+
+  /// Disposes the render [Ticker] without tearing down the renderer.
+  ///
+  /// The ticker is vended by the host [State]'s [TickerProvider], so it must be
+  /// disposed when that State is disposed (e.g. the viewport widget unmounts
+  /// when switching editor modes). The renderer/texture stay alive so a later
+  /// [ensureInitialized] on remount can recreate the ticker and resume.
+  void detachTicker();
+
   Future<void> dispose();
   Future<void> startAnimation();
   Future<void> stopAnimation();

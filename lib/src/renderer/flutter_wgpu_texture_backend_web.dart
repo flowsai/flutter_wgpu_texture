@@ -138,6 +138,12 @@ class _WebFlutterWgpuTextureBackend implements FlutterWgpuTextureBackend {
   }
 
   @override
+  void detachTicker() {
+    // Web drives frames off a Timer, not a State-vended Ticker, so there is no
+    // ticker tied to the widget lifecycle to detach.
+  }
+
+  @override
   Future<void> dispose() async {
     await stopAnimation();
     _renderer?.dispose();
